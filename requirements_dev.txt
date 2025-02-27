@@ -1,0 +1,19 @@
+wheel
+watchdog
+flake8
+tox
+coverage
+Sphinx
+twine
+black
+
+
+# dependencies for the project
+
+requests
+celery
+django
+djangorestframework
+django-environ
+django-filter
+jsonschema
