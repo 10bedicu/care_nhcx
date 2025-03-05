@@ -60,7 +60,7 @@ class ParticipantService:
         path = "/participant/get/policies"
         response = ParticipantService.request.post(
             path,
-            data.model_dump(mode="json"),
+            data.model_dump(mode="json", exclude_none=True),
             headers=ParticipantService.headers(),
         )
 
@@ -77,7 +77,7 @@ class ParticipantService:
         path = "/participant/search"
         response = ParticipantService.request.post(
             path,
-            data.model_dump(mode="json"),
+            data.model_dump(mode="json", exclude_none=True),
             headers=ParticipantService.headers(),
         )
 
@@ -95,7 +95,7 @@ class ParticipantService:
         path = "/fetch/certs"
         response = ParticipantService.request.post(
             path,
-            data.model_dump(mode="json"),
+            data.model_dump(mode="json", exclude_none=True),
             headers=ParticipantService.headers(),
         )
 
@@ -112,7 +112,7 @@ class ParticipantService:
         path = "/participant/create"
         response = ParticipantService.request.post(
             path,
-            data.model_dump(mode="json"),
+            data.model_dump(mode="json", exclude_none=True),
             headers=ParticipantService.headers(),
         )
 
@@ -129,7 +129,7 @@ class ParticipantService:
         path = "/participant/update"
         response = ParticipantService.request.post(
             path,
-            data.model_dump(mode="json"),
+            data.model_dump(mode="json", exclude_none=True),
             headers=ParticipantService.headers(),
         )
 

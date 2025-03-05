@@ -40,7 +40,7 @@ class ProviderViewSet(
                 phone=[instance.facility.phone_number[-10:]],
                 primaryMobile=instance.facility.phone_number[-10:],
                 encryption_cert=b64encode(bytes(certificate, "utf-8")).decode("utf-8"),
-                endpoint_url=plugin_settings.BACKEND_DOMAIN,
+                endpoint_url=plugin_settings.BACKEND_DOMAIN + "/api/nhcx",
             )
         )
 

@@ -97,9 +97,11 @@ class PluginSettings:  # pragma: no cover
             delattr(self, "_user_settings")
 
 
-REQUIRED_SETTINGS = {}
+REQUIRED_SETTINGS = {"BACKEND_DOMAIN"}
 
-DEFAULTS = {}
+DEFAULTS = {
+    "BACKEND_DOMAIN": "https://careapi.ohc.network",
+}
 
 plugin_settings = PluginSettings(
     PLUGIN_NAME, defaults=DEFAULTS, required_settings=REQUIRED_SETTINGS
