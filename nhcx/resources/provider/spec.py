@@ -37,6 +37,10 @@ class ProviderCreateSpec(BaseProviderSpec):
             obj.facility = Facility.objects.get(external_id=self.facility)
 
 
+class ProviderUpdateSpec(BaseProviderSpec):
+    regenerate_keys: bool = False
+
+
 class ProviderRetrieveSpec(BaseProviderSpec):
     participant_code: str | None
     facility: FacilityRetrieveSpec

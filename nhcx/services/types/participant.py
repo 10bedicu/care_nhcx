@@ -99,7 +99,8 @@ class CreateParticipantResponse(BaseModel):
 
 
 class UpdateParticipantBody(CreateParticipantBody):
-    pass
+    participant_code: str
+    encryption_cert: str | None
 
 
 class UpdateParticipantResponse(BaseModel):
