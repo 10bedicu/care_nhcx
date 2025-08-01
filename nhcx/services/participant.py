@@ -3,7 +3,7 @@ from typing import Any
 from rest_framework import status
 
 from care_abdm.abdm.service.request import Request
-from care_nhcx.nhcx.services.types.participant import (
+from nhcx.services.types.participant import (
     CreateParticipantBody,
     CreateParticipantResponse,
     FetchCertsBody,
@@ -15,7 +15,7 @@ from care_nhcx.nhcx.services.types.participant import (
     UpdateParticipantBody,
     UpdateParticipantResponse,
 )
-from care_nhcx.nhcx.utils.exceptions import NHCXAPIException
+from nhcx.utils.exceptions import NHCXAPIException
 
 
 class ParticipantService:

@@ -7,11 +7,6 @@ from care.emr.api.viewsets.base import (
     EMRUpdateMixin,
 )
 from nhcx.models.provider import Provider
-from nhcx.resources.provider.spec import (
-    ProviderCreateSpec,
-    ProviderRetrieveSpec,
-    ProviderUpdateSpec,
-)
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import (
     CreateParticipantBody,
@@ -20,6 +15,11 @@ from nhcx.services.types.participant import (
     UpdateParticipantBody,
 )
 from nhcx.settings import settings as plugin_settings
+from nhcx.specs.provider import (
+    ProviderCreateSpec,
+    ProviderRetrieveSpec,
+    ProviderUpdateSpec,
+)
 from nhcx.utils.crypt import generate_encryption_certificate
 
 
