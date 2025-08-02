@@ -1,6 +1,9 @@
+import json
+
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters as drf_filters
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -12,11 +15,14 @@ from care.emr.api.viewsets.base import (
     EMRRetrieveMixin,
 )
 from nhcx.models.coverage_eligibility import CoverageEligibilityRequest
+from nhcx.services.gateway import GatewayService
 from nhcx.specs.coverage_eligibility import (
     CoverageEligibilityRequestCreateSpec,
     CoverageEligibilityRequestRetrieveSpec,
     CoverageEligibilityRequestStatusChoices,
 )
+from nhcx.utils.fhir import Fhir
+from nhcx.utils.nhcx import NHCX
 
 
 class CoverageEligibilityRequestFilter(filters.FilterSet):
@@ -63,4 +69,38 @@ class CoverageEligibilityRequestViewSet(
             self.get_retrieve_pydantic_model()
             .serialize(coverage_eligibility_request)
             .to_json()
+        )
+
+    @extend_schema(
+        request=None,
+        responses={200: CoverageEligibilityRequestRetrieveSpec},
+    )
+    @action(detail=True, methods=["POST"])
+    def check(self, request, *args, **kwargs):
+        coverage_eligibility_request = self.get_object()
+
+        fhir_data = Fhir().create_coverage_eligibility_request_bundle(
+            coverage_eligibility_request
+        )
+        fhir_payload = json.loads(fhir_data.json())
+
+        encrypted_payload = NHCX.encrypt(
+            sender_code=coverage_eligibility_request.provider.participant_code,
+            recipient_code=coverage_eligibility_request.insurer.get("participant_code"),
+            patient_abha_number=coverage_eligibility_request.patient.abha_number.abha_number,
+            correlation_id=str(coverage_eligibility_request.external_id),
+            data=fhir_payload,
+        )
+
+        _response = GatewayService.coverage_eligibility__check(encrypted_payload)
+
+        print("--------------------------------")
+        print(_response)
+        print("--------------------------------")
+
+        return Response(
+            CoverageEligibilityRequestRetrieveSpec.serialize(
+                coverage_eligibility_request
+            ).model_dump(mode="json"),
+            status=status.HTTP_200_OK,
         )

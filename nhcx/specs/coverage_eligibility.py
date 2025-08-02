@@ -180,8 +180,11 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
     @field_validator("patient")
     @classmethod
     def validate_patient(cls, value):
-        if not Patient.objects.filter(external_id=value).exists():
+        patient = Patient.objects.filter(external_id=value).first()
+        if not patient:
             raise ValidationError("Patient not found")
+        if not hasattr(patient, "abha_number"):
+            raise ValidationError("Patient abha number is required")
         return value
 
     @field_validator("facility")

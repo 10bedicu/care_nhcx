@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from functools import reduce, wraps
+from functools import wraps
 from uuid import uuid4
 
 from django.db import models
@@ -53,7 +53,6 @@ from care.emr.models.patient import Patient as PatientModel
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
-from care_nhcx.nhcx.services.types.participant import Participant, Policy
 from nhcx.models.claim import Claim as ClaimModel
 from nhcx.models.claim import ClaimResponse as ClaimResponseModel
 from nhcx.models.coverage_eligibility import (
@@ -62,6 +61,7 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
+from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
 
 CARE_IDENTIFIER_SYSTEM = settings.BACKEND_DOMAIN
@@ -453,7 +453,7 @@ class Fhir:
                     productOrService=self._coding_to_codable_concept(
                         CodingSpec(**item.get("product_or_service"))
                     ),
-                    quantity=Quantity(value=item.get("quantity")),
+                    quantity=Quantity(**item.get("quantity")),
                     unitPrice=Money(value=item.get("unit_price"), currency="INR"),
                     diagnosis=[
                         CoverageEligibilityRequestItemDiagnosis(
@@ -705,12 +705,29 @@ class Fhir:
                     quantity=Quantity(**item.get("quantity"))
                     if item.get("quantity")
                     else None,
+                    net=Money(
+                        value=(
+                            (item.get("unit_price", 0))
+                            * (item.get("quantity", {}).get("value", 1))
+                        ),
+                        currency="INR",
+                    ),
                     factor=item.get("factor"),
                 )
                 for item in claim.item
             ]
             if claim.item
             else None,
+            total=Money(
+                value=(
+                    sum(
+                        (item.get("unit_price", 0))
+                        * (item.get("quantity", {}).get("value", 1))
+                        for item in claim.item
+                    )
+                ),
+                currency="INR",
+            ),
         )
 
     def _bundle_entry(self, resource: Resource):
@@ -839,15 +856,6 @@ class Fhir:
 
         claim_instance = ClaimModel.objects.filter(external_id=request_id).first()
 
-        total_amount = reduce(
-            lambda price, acc: price + acc,
-            (
-                float(claim_response_total.get("amount", {}).get("value", 0))
-                for claim_response_total in claim_response.total
-            ),
-            0.0,
-        )
-
         # TODO: use ClaimResponseSpec to create the instance
         claim_response_instance = ClaimResponseModel.objects.create(
             request=claim_instance,
@@ -857,7 +865,6 @@ class Fhir:
             item=claim_response.item,
             add_item=claim_response.addItem,
             total=claim_response.total,
-            total_amount=total_amount,
             meta={
                 "raw_response": response,
                 "raw_headers": headers,
