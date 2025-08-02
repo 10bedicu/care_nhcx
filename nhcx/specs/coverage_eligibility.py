@@ -76,7 +76,6 @@ class CoverageEligibilityRequestSupportingInfoSpec(BaseModel):
 
 
 class CoverageEligibilityRequestInsuranceSpec(BaseModel):
-    sequence: int
     focal: bool
     policy: Policy
 
