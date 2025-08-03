@@ -16,18 +16,6 @@ from care.emr.resources.common.quantity import Quantity
 from care.emr.resources.condition.spec import ConditionReadSpec
 from care.emr.resources.encounter.spec import User
 from care.emr.resources.file_upload.spec import FileUploadRetrieveSpec
-from care.emr.resources.specimen_definition.valueset import (
-    NHCX_CLAIM_ACCIDENT_TYPE_VALUESET,
-    NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET,
-    NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET,
-    NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET,
-    NHCX_CLAIM_PROCEDURE_CODE_VALUESET,
-    NHCX_CLAIM_PROCEDURE_TYPE_VALUESET,
-    NHCX_CLAIM_PROGRAM_CODE_VALUESET,
-    NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET,
-    NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET,
-    NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET,
-)
 from care.emr.resources.user.spec import UserSpec
 from care.emr.utils.valueset_coding_type import ValueSetBoundCoding
 from nhcx.models.claim import Claim, ClaimResponse
@@ -35,8 +23,18 @@ from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
 from nhcx.specs.valuesets.claim import (
+    NHCX_CLAIM_ACCIDENT_TYPE_VALUESET,
+    NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET,
+    NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET,
+    NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET,
     NHCX_CLAIM_ITEM_CATEGORY_VALUESET,
+    NHCX_CLAIM_PROCEDURE_CODE_VALUESET,
+    NHCX_CLAIM_PROCEDURE_TYPE_VALUESET,
     NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET,
+    NHCX_CLAIM_PROGRAM_CODE_VALUESET,
+    NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET,
+    NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET,
+    NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET,
     NHCX_CLAIM_TYPE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
@@ -84,7 +82,9 @@ class ClaimCareTeamSpec(BaseModel):
 
 class ClaimDiagnosisSpec(BaseModel):
     sequence: int
-    type: ValueSetBoundCoding[NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET.slug] | None = None
+    type: list[ValueSetBoundCoding[NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET.slug]] = Field(
+        [], min_length=1
+    )
     diagnosis_reference: UUID4 | None = None
     diagnosis_code: (
         ValueSetBoundCoding[NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET.slug] | None
@@ -118,7 +118,7 @@ class ClaimDiagnosisSpec(BaseModel):
 
 class ClaimProcedureSpec(BaseModel):
     sequence: int
-    type: ValueSetBoundCoding[NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.slug] | None = None
+    type: list[ValueSetBoundCoding[NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.slug]] = []
     date: datetime | None = None
     procedure_reference: UUID4 | None = None
     procedure_code: (
@@ -260,7 +260,10 @@ class ClaimPayeeSpec(BaseModel):
 class ClaimBaseSpec(EMRResource):
     __model__ = Claim
     __exclude__ = ["patient", "provider", "encounter"]
-    id: UUID4 = None
+    id: UUID4 | None = None
+
+    created_date: datetime | None = None
+    modified_date: datetime | None = None
 
 
 class ClaimCreateSpec(ClaimBaseSpec):
@@ -314,7 +317,8 @@ class ClaimCreateSpec(ClaimBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code=self.insurance[0].policy.payerid
+                    participant_code="1000003538@hcx"  # TODO: remove this after testing
+                    or self.insurance[0].policy.payerid
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
@@ -333,6 +337,9 @@ class ClaimResponseRetrieveSpec(EMRResource):
     total: dict | None = None
     error: dict | None = None
     meta: dict
+
+    created_date: datetime | None = None
+    modified_date: datetime | None = None
 
 
 class ClaimRetrieveSpec(ClaimBaseSpec):

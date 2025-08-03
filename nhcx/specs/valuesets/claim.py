@@ -206,6 +206,281 @@ NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.register_valueset(
 NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.register_as_system()
 
 
+NHCX_CLAIM_PROGRAM_CODE_VALUESET = CareValueset(
+    "Claim Program Code",
+    "system-claim-program-code",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_PROGRAM_CODE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-program-code",
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_PROGRAM_CODE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_ACCIDENT_TYPE_VALUESET = CareValueset(
+    "Claim Accident Type",
+    "system-claim-accident-type",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_ACCIDENT_TYPE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                filter=[
+                    {"property": "concept", "op": "is-a", "value": "_ActIncidentCode"}
+                ],
+            )
+        ],
+        exclude=[
+            ValueSetInclude(
+                system="http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                concept=[{"code": "_ActIncidentCode", "display": "ActIncidentCode"}],
+            )
+        ],
+    )
+)
+
+NHCX_CLAIM_ACCIDENT_TYPE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET = CareValueset(
+    "Claim Care Team Role",
+    "system-claim-care-team-role",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                concept=[
+                    {
+                        "code": "405623001",
+                        "display": "Assigned practitioner (occupation)",
+                    },
+                    {"code": "768839008", "display": "Consultant (occupation)"},
+                    {"code": "88189002", "display": "Anesthesiologist (occupation)"},
+                    {
+                        "code": "223366009",
+                        "display": "Healthcare professional (occupation)",
+                    },
+                ],
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET = CareValueset(
+    "Claim Related Relationship",
+    "system-claim-related-relationship",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            # ValueSetInclude(
+            #     system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-related-claim-relationship-code",
+            # ),
+            ValueSetInclude(
+                system="http://terminology.hl7.org/CodeSystem/ex-relatedclaimrelationship",
+                concept=[
+                    {"code": "associated", "display": "Associated Claim"},
+                    {"code": "prior", "display": "Prior Claim"},
+                ],
+            ),
+        ]
+    )
+)
+
+NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET = CareValueset(
+    "Claim Supporting Info Category",
+    "system-claim-supporting-info-category",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET = CareValueset(
+    "Claim Supporting Info Code",
+    "system-claim-supporting-info-code",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
+            ),
+            ValueSetInclude(
+                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                concept=[
+                    {"code": "DL", "display": "Driver's license number"},
+                    {"code": "PPN", "display": "Passport number"},
+                ],
+            ),
+            ValueSetInclude(
+                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
+            ),
+        ]
+    )
+)
+
+NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET = CareValueset(
+    "Claim Diagnosis Type",
+    "system-claim-diagnosis-type",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                concept=[
+                    {
+                        "code": "148006",
+                        "display": "Preliminary diagnosis (contextual qualifier) (qualifier value)",
+                    },
+                    {
+                        "code": "47965005",
+                        "display": "Differential diagnosis (contextual qualifier) (qualifier value)",
+                    },
+                    {
+                        "code": "89100005",
+                        "display": "Final diagnosis (discharge) (contextual qualifier) (qualifier value)",
+                    },
+                    {
+                        "code": "106229004",
+                        "display": "Qualifier for type of diagnosis (qualifier value)",
+                    },
+                ],
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET = CareValueset(
+    "Claim Diagnosis Code",
+    "system-claim-diagnosis-code",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "404684003"}],
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_PROCEDURE_CODE_VALUESET = CareValueset(
+    "Claim Procedure Code",
+    "system-claim-procedure-code",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_PROCEDURE_CODE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "71388002"}],
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_PROCEDURE_CODE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_PROCEDURE_TYPE_VALUESET = CareValueset(
+    "Claim Procedure Type",
+    "system-claim-procedure-type",
+    ValueSetStatusOptions.active.value,
+)
+
+NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.register_valueset(
+    ValueSetCompose(
+        include=[
+            ValueSetInclude(
+                system="http://terminology.hl7.org/CodeSystem/ex-procedure-type"
+            )
+        ]
+    )
+)
+
+NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.register_as_system()
+
+
+NHCX_CLAIM_ACCIDENT_TYPE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_ITEM_CATEGORY_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_PROCEDURE_CODE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_PROCEDURE_TYPE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
 NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_PROGRAM_CODE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET = (
     NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
 )

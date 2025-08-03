@@ -3,9 +3,11 @@ from rest_framework.routers import DefaultRouter
 from nhcx.viewsets.callback import CallbackViewSet
 from nhcx.viewsets.claim import ClaimViewSet
 from nhcx.viewsets.coverage_eligibility import CoverageEligibilityRequestViewSet
+from nhcx.viewsets.gateway import GatewayViewSet
 
 router = DefaultRouter()
 
+router.register("gateway", GatewayViewSet, basename="nhcx-gateway")
 router.register(
     r"coverage-eligibility-request",
     CoverageEligibilityRequestViewSet,

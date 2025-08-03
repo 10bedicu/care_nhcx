@@ -545,7 +545,9 @@ class Fhir:
                     )
                     if related.get("relationship")
                     else None,
-                    reference=related.get("reference"),
+                    reference=Identifier(value=related.get("reference"))
+                    if related.get("reference")
+                    else None,
                 )
                 for related in claim.related
             ]
@@ -583,9 +585,10 @@ class Fhir:
             diagnosis=[
                 ClaimDiagnosis(
                     sequence=diagnosis.get("sequence"),
-                    type=self._coding_to_codable_concept(
-                        CodingSpec(**diagnosis.get("type"))
-                    )
+                    type=[
+                        self._coding_to_codable_concept(CodingSpec(**diagnosis_type))
+                        for diagnosis_type in diagnosis.get("type")
+                    ]
                     if diagnosis.get("type")
                     else None,
                     diagnosisReference=self._reference(
@@ -618,9 +621,10 @@ class Fhir:
             procedure=[
                 ClaimProcedure(
                     sequence=procedure.get("sequence"),
-                    type=self._coding_to_codable_concept(
-                        CodingSpec(**procedure.get("type"))
-                    )
+                    type=[
+                        self._coding_to_codable_concept(CodingSpec(**procedure_type))
+                        for procedure_type in procedure.get("type")
+                    ]
                     if procedure.get("type")
                     else None,
                     procedureReference=self._reference(
@@ -637,9 +641,7 @@ class Fhir:
                     )
                     if not procedure.get("procedure_reference")
                     else None,
-                    date=procedure.get("date").isoformat()
-                    if procedure.get("date")
-                    else None,
+                    date=procedure.get("date") if procedure.get("date") else None,
                 )
                 for procedure in claim.procedure
             ]
@@ -702,7 +704,18 @@ class Fhir:
                     )
                     if item.get("unit_price")
                     else None,
-                    quantity=Quantity(**item.get("quantity"))
+                    quantity=Quantity(
+                        value=item.get("quantity", {}).get("value"),
+                        unit=item.get("quantity", {})
+                        .get("unit", {})
+                        .get("display", "Piece / unit"),
+                        system=item.get("quantity", {})
+                        .get("unit", {})
+                        .get("system", "http://unitsofmeasure.org"),
+                        code=item.get("quantity", {})
+                        .get("unit", {})
+                        .get("code", "unit"),
+                    )
                     if item.get("quantity")
                     else None,
                     net=Money(

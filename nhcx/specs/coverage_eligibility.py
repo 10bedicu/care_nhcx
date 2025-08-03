@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 
 from django.shortcuts import get_object_or_404
@@ -166,6 +167,9 @@ class CoverageEligibilityRequestBaseSpec(EMRResource):
     __exclude__ = ["patient", "facility"]
     id: UUID4 = None
 
+    created_date: datetime | None = None
+    modified_date: datetime | None = None
+
 
 class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
     status: CoverageEligibilityRequestStatusChoices
@@ -217,6 +221,10 @@ class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     disposition: str | None = None
     insurance: dict | None = None
     error: dict | None = None
+    meta: dict
+
+    created_date: datetime
+    modified_date: datetime
 
 
 class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestBaseSpec):
@@ -231,8 +239,8 @@ class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestBaseSpec)
     provider: UUID4
     patient: UUID4
     latest_response: dict | None = None
-    created_by: UUID4 | None = None
-    updated_by: UUID4 | None = None
+    created_by: dict | None = None
+    updated_by: dict | None = None
 
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
