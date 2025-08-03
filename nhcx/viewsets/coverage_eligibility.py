@@ -18,6 +18,7 @@ from nhcx.models.coverage_eligibility import CoverageEligibilityRequest
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.coverage_eligibility import (
     CoverageEligibilityRequestCreateSpec,
+    CoverageEligibilityRequestListSpec,
     CoverageEligibilityRequestRetrieveSpec,
     CoverageEligibilityRequestStatusChoices,
 )
@@ -39,6 +40,7 @@ class CoverageEligibilityRequestViewSet(
 ):
     database_model = CoverageEligibilityRequest
     pydantic_model = CoverageEligibilityRequestCreateSpec
+    pydantic_read_model = CoverageEligibilityRequestListSpec
     pydantic_retrieve_model = CoverageEligibilityRequestRetrieveSpec
     filter_backends = [filters.DjangoFilterBackend, drf_filters.OrderingFilter]
     filterset_class = CoverageEligibilityRequestFilter
@@ -93,10 +95,6 @@ class CoverageEligibilityRequestViewSet(
         )
 
         _response = GatewayService.coverage_eligibility__check(encrypted_payload)
-
-        print("--------------------------------")
-        print(_response)
-        print("--------------------------------")
 
         return Response(
             CoverageEligibilityRequestRetrieveSpec.serialize(

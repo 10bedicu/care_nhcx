@@ -336,10 +336,51 @@ class ClaimResponseRetrieveSpec(EMRResource):
     add_item: dict | None = None
     total: dict | None = None
     error: dict | None = None
-    meta: dict
 
     created_date: datetime | None = None
     modified_date: datetime | None = None
+
+
+class ClaimListSpec(ClaimBaseSpec):
+    use: str
+    status: str
+    priority: str
+    type: dict | None = None
+    insurer: dict
+    billable_period: dict | None = None
+    related: list[dict] = []
+    care_team: list[dict] = []
+    supporting_info: list[dict] = []
+    procedure: list[dict] = []
+    diagnosis: list[dict] = []
+    insurance: list[dict] = []
+    item: list[dict] = []
+    accident: dict | None = None
+    payee: dict | None = None
+
+    provider: UUID4
+    patient: UUID4
+    encounter: UUID4
+    latest_response: dict | None = None
+    created_by: dict | None = None
+    updated_by: dict | None = None
+
+    @classmethod
+    def perform_extra_serialization(cls, mapping, obj):
+        mapping["id"] = obj.external_id
+
+        latest_response = (
+            ClaimResponse.objects.filter(request=obj).order_by("-created_date").first()
+        )
+        if latest_response:
+            mapping["latest_response"] = ClaimResponseRetrieveSpec.serialize(
+                latest_response
+            ).to_json()
+
+        if obj.created_by:
+            mapping["created_by"] = UserSpec.serialize(obj.created_by).to_json()
+        if obj.updated_by:
+            mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
 
 
 class ClaimRetrieveSpec(ClaimBaseSpec):

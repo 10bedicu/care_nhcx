@@ -18,6 +18,7 @@ from nhcx.models.claim import Claim
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.claim import (
     ClaimCreateSpec,
+    ClaimListSpec,
     ClaimRetrieveSpec,
     ClaimStatusChoices,
     ClaimUseChoices,
@@ -41,6 +42,7 @@ class ClaimViewSet(
 ):
     database_model = Claim
     pydantic_model = ClaimCreateSpec
+    pydantic_read_model = ClaimListSpec
     pydantic_retrieve_model = ClaimRetrieveSpec
     filter_backends = [filters.DjangoFilterBackend, drf_filters.OrderingFilter]
     filterset_class = ClaimFilter
@@ -95,10 +97,6 @@ class ClaimViewSet(
             _response = GatewayService.pre_auth__submit(encrypted_payload)
         elif claim.use == ClaimUseChoices.PRE_DETERMINATION:
             _response = GatewayService.predetermination__submit(encrypted_payload)
-
-        print("--------------------------------")
-        print(_response)
-        print("--------------------------------")
 
         return Response(
             ClaimRetrieveSpec.serialize(claim).model_dump(mode="json"),

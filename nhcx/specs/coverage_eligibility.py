@@ -221,10 +221,48 @@ class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     disposition: str | None = None
     insurance: dict | None = None
     error: dict | None = None
-    meta: dict
 
     created_date: datetime
     modified_date: datetime
+
+
+class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
+    status: str
+    priority: str
+    purpose: list[str]
+    insurer: dict
+    supporting_info: list[dict]
+    insurance: list[dict]
+    item: list[dict]
+
+    provider: UUID4
+    patient: UUID4
+    latest_response: dict | None = None
+    created_by: dict | None = None
+    updated_by: dict | None = None
+
+    @classmethod
+    def perform_extra_serialization(cls, mapping, obj):
+        mapping["id"] = obj.external_id
+
+        latest_response = (
+            CoverageEligibilityResponse.objects.filter(
+                request__coverage__external_id=obj.external_id
+            )
+            .order_by("-created_date")
+            .first()
+        )
+        if latest_response:
+            mapping["latest_response"] = (
+                CoverageEligibilityResponseRetrieveSpec.serialize(
+                    latest_response
+                ).to_json()
+            )
+
+        if obj.created_by:
+            mapping["created_by"] = UserSpec.serialize(obj.created_by).to_json()
+        if obj.updated_by:
+            mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
 
 
 class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestBaseSpec):
