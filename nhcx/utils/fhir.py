@@ -49,6 +49,7 @@ from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.money import Money
 from fhir.resources.R4B.organization import Organization
 from fhir.resources.R4B.patient import Patient
+from fhir.resources.R4B.paymentreconciliation import PaymentReconciliation
 from fhir.resources.R4B.period import Period
 from fhir.resources.R4B.practitioner import Practitioner
 from fhir.resources.R4B.quantity import Quantity
@@ -75,6 +76,7 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
+from nhcx.models.payment import PaymentReconciliation as PaymentReconciliationModel
 from nhcx.models.task import Task as TaskModel
 from nhcx.models.task import TaskUseCaseChoices
 from nhcx.services.types.participant import Participant, Policy
@@ -1133,3 +1135,90 @@ class Fhir:
             task_instance.save()
 
         return (task_instance, communication_request_instance, claim_instance)
+
+    def process_payment_notice_request(
+        self, response: dict, headers: dict | None = None
+    ):
+        # Using construct to avoid fhir validation errors
+        payment_notice_request_bundle = Bundle.construct(**response)
+
+        task = Task.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "Task",
+                    payment_notice_request_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        payment_reconciliation = PaymentReconciliation.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "PaymentReconciliation",
+                    payment_notice_request_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        claim_request = Claim.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "Claim",
+                    payment_notice_request_bundle.entry,
+                ),
+                {},
+            ).get("resource", {})
+        )
+        request_id = claim_request.id or payment_notice_request_bundle.id
+        # TODO: verify if bundle id is claim id in production
+
+        claim_instance = ClaimModel.objects.filter(external_id=request_id).first()
+
+        with transaction.atomic():
+            # TODO: use TaskSpec to create the instance
+            task_instance = TaskModel.objects.create(
+                identifier=task.id,
+                status=task.status,
+                intent=task.intent,
+                priority=task.priority,
+                code=task.code,
+                authored_on=task.authoredOn,
+                description=task.description,
+                reason_code=task.reasonCode,
+                input=task.input,
+                output=task.output,
+                claim=claim_instance,
+                use_case=TaskUseCaseChoices.PAYMENT_NOTICE_REQUEST,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            # TODO: use CommunicationRequestSpec to create the instance
+            payment_reconciliation_instance = PaymentReconciliationModel.objects.create(
+                identifier=payment_reconciliation.id,
+                status=payment_reconciliation.status,
+                period=payment_reconciliation.period,
+                outcome=payment_reconciliation.outcome,
+                disposition=payment_reconciliation.disposition,
+                payment_date=payment_reconciliation.paymentDate,
+                payment_amount=payment_reconciliation.paymentAmount,
+                payment_identifier=payment_reconciliation.paymentIdentifier,
+                detail=payment_reconciliation.detail,
+                process_note=payment_reconciliation.processNote,
+                request=task_instance,
+                claim=claim_instance,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            task_instance.focus = payment_reconciliation_instance
+            task_instance.save()
+
+        return (task_instance, payment_reconciliation_instance, claim_instance)

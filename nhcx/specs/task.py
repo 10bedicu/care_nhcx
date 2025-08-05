@@ -5,11 +5,13 @@ from pydantic import UUID4
 from care.emr.resources.base import EMRResource
 from care.emr.resources.user.spec import UserSpec
 from nhcx.models.communication import Communication, CommunicationRequest
+from nhcx.models.payment import PaymentReconciliation
 from nhcx.models.task import Task
 from nhcx.specs.communication import (
     CommunicationRequestRetrieveSpec,
     CommunicationRetrieveSpec,
 )
+from nhcx.specs.payment import PaymentReconciliationRetrieveSpec
 
 
 class TaskBaseSpec(EMRResource):
@@ -56,5 +58,9 @@ class TaskListSpec(TaskBaseSpec):
                 ).to_json()
             if isinstance(obj.focus, CommunicationRequest):
                 mapping["focus"] = CommunicationRequestRetrieveSpec.serialize(
+                    obj.focus
+                ).to_json()
+            if isinstance(obj.focus, PaymentReconciliation):
+                mapping["focus"] = PaymentReconciliationRetrieveSpec.serialize(
                     obj.focus
                 ).to_json()

@@ -289,9 +289,12 @@ class CallbackViewSet(EMRBaseViewSet):
                 data=payload,
             )
 
-            print("--------------------------------")
-            print(decrypted_data)
-            print("--------------------------------")
+            (task, payment_reconciliation_request, claim) = (
+                Fhir().process_payment_notice_request(
+                    decrypted_data,
+                    headers,
+                )
+            )
 
             nhcx_response = NHCXResponse.create_success_response(
                 api_call_id=headers.get("x-hcx-api_call_id"),

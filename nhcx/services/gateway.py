@@ -130,3 +130,18 @@ class GatewayService:
             raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
 
         return response.json()
+
+    @staticmethod
+    def payment_notice__on_request(payload: str) -> dict:
+        path = "/v1/paymentnotice/on_request"
+
+        response = GatewayService.request.post(
+            path,
+            {"type": "JWEPayload", "payload": payload},
+            headers=GatewayService.headers(),
+        )
+
+        if response.status_code != status.HTTP_202_ACCEPTED:
+            raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return response.json()
