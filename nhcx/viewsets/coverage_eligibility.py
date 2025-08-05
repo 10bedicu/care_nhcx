@@ -47,6 +47,9 @@ class CoverageEligibilityRequestViewSet(
         "modified_date",
     ]
 
+    def get_queryset(self):
+        return self.database_model.objects.all().order_by("-modified_date")
+
     @extend_schema(
         request=None,
         responses={200: CoverageEligibilityRequestRetrieveSpec},

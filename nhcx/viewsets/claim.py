@@ -50,6 +50,9 @@ class ClaimViewSet(
         "modified_date",
     ]
 
+    def get_queryset(self):
+        return self.database_model.objects.all().order_by("-modified_date")
+
     @extend_schema(
         request=None,
         responses={200: ClaimRetrieveSpec},
@@ -107,7 +110,7 @@ class ClaimViewSet(
     def tasks(self, request, *args, **kwargs):
         claim = self.get_object()
 
-        tasks = Task.objects.filter(claim=claim)
+        tasks = Task.objects.filter(claim=claim).order_by("-modified_date")
 
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(tasks, request)
