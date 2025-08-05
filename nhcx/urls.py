@@ -2,6 +2,7 @@ from rest_framework.routers import DefaultRouter
 
 from nhcx.viewsets.callback import CallbackViewSet
 from nhcx.viewsets.claim import ClaimViewSet
+from nhcx.viewsets.communication import CommunicationViewSet
 from nhcx.viewsets.coverage_eligibility import CoverageEligibilityRequestViewSet
 from nhcx.viewsets.gateway import GatewayViewSet
 
@@ -14,6 +15,7 @@ router.register(
     basename="nhcx-coverage-eligibility",
 )
 router.register(r"claim", ClaimViewSet, basename="nhcx-claim")
+router.register(r"communication", CommunicationViewSet, basename="nhcx-communication")
 
 
 callback_router = DefaultRouter(trailing_slash=False)

@@ -2,11 +2,12 @@ from datetime import datetime
 from enum import Enum
 
 from django.shortcuts import get_object_or_404
-from pydantic import UUID4, BaseModel, field_validator, model_validator
+from pydantic import UUID4, BaseModel, Field, field_validator, model_validator
 from rest_framework.exceptions import ValidationError
 
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.condition import Condition
+from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import Patient
 from care.emr.resources.base import EMRResource
@@ -164,7 +165,7 @@ class CoverageEligibilityRequestItemSpec(BaseModel):
 
 class CoverageEligibilityRequestBaseSpec(EMRResource):
     __model__ = CoverageEligibilityRequest
-    __exclude__ = ["patient", "facility"]
+    __exclude__ = ["patient", "facility", "encounter"]
     id: UUID4 = None
 
     created_date: datetime | None = None
@@ -174,12 +175,20 @@ class CoverageEligibilityRequestBaseSpec(EMRResource):
 class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
     status: CoverageEligibilityRequestStatusChoices
     priority: CoverageEligibilityRequestPriorityChoices
-    purpose: list[CoverageEligibilityRequestPurposeChoices]
+    purpose: list[CoverageEligibilityRequestPurposeChoices] = Field([], min_length=1)
     facility: UUID4
     patient: UUID4
-    supporting_info: list[CoverageEligibilityRequestSupportingInfoSpec]
-    insurance: list[CoverageEligibilityRequestInsuranceSpec]
-    item: list[CoverageEligibilityRequestItemSpec]
+    encounter: UUID4 | None = None
+    supporting_info: list[CoverageEligibilityRequestSupportingInfoSpec] = []
+    insurance: list[CoverageEligibilityRequestInsuranceSpec] = Field([], min_length=1)
+    item: list[CoverageEligibilityRequestItemSpec] = []
+
+    @field_validator("encounter")
+    @classmethod
+    def validate_encounter(cls, value):
+        if value and not Encounter.objects.filter(external_id=value).exists():
+            raise ValidationError("Encounter not found")
+        return value
 
     @field_validator("patient")
     @classmethod
@@ -199,13 +208,16 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
         return value
 
     def perform_extra_deserialization(self, is_update, obj):
+        if self.encounter:
+            obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
+
         obj.patient = get_object_or_404(Patient, external_id=self.patient)
         obj.provider = get_object_or_404(Provider, facility__external_id=self.facility)
 
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code=self.insurance[0].policy.payerid
+                    participant_code="1000003538@hcx"  # TODO: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
@@ -221,9 +233,15 @@ class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     disposition: str | None = None
     insurance: dict | None = None
     error: dict | None = None
+    request: UUID4
 
     created_date: datetime
     modified_date: datetime
+
+    @classmethod
+    def perform_extra_serialization(cls, mapping, obj):
+        mapping["id"] = obj.external_id
+        mapping["request"] = obj.request.external_id
 
 
 class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
@@ -237,6 +255,7 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
 
     provider: UUID4
     patient: UUID4
+    encounter: UUID4 | None = None
     latest_response: dict | None = None
     created_by: dict | None = None
     updated_by: dict | None = None
@@ -244,10 +263,13 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
+        mapping["provider"] = obj.provider.external_id
+        mapping["patient"] = obj.patient.external_id
+        mapping["encounter"] = obj.encounter.external_id if obj.encounter else None
 
         latest_response = (
             CoverageEligibilityResponse.objects.filter(
-                request__coverage__external_id=obj.external_id
+                request__external_id=obj.external_id
             )
             .order_by("-created_date")
             .first()
@@ -265,43 +287,11 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
             mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
 
 
-class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestBaseSpec):
-    status: str
-    priority: str
-    purpose: list[str]
-    insurer: dict
-    supporting_info: list[dict]
-    insurance: list[dict]
-    item: list[dict]
-
-    provider: UUID4
-    patient: UUID4
-    latest_response: dict | None = None
-    created_by: dict | None = None
-    updated_by: dict | None = None
+class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestListSpec):
 
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
-        mapping["id"] = obj.external_id
-
-        latest_response = (
-            CoverageEligibilityResponse.objects.filter(
-                request__coverage__external_id=obj.external_id
-            )
-            .order_by("-created_date")
-            .first()
-        )
-        if latest_response:
-            mapping["latest_response"] = (
-                CoverageEligibilityResponseRetrieveSpec.serialize(
-                    latest_response
-                ).to_json()
-            )
-
-        if obj.created_by:
-            mapping["created_by"] = UserSpec.serialize(obj.created_by).to_json()
-        if obj.updated_by:
-            mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
+        super().perform_extra_serialization(mapping, obj)
 
         if obj.supporting_info:
             mapping["supporting_info"] = []

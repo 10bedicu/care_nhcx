@@ -1,8 +1,9 @@
+import base64
 from datetime import UTC, datetime
 from functools import wraps
 from uuid import uuid4
 
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Value
 from django.db.models.functions import Replace
 from fhir.resources.R4B.address import Address
@@ -22,6 +23,11 @@ from fhir.resources.R4B.claim import (
 from fhir.resources.R4B.claimresponse import ClaimResponse
 from fhir.resources.R4B.codeableconcept import CodeableConcept
 from fhir.resources.R4B.coding import Coding
+from fhir.resources.R4B.communication import Communication, CommunicationPayload
+from fhir.resources.R4B.communicationrequest import (
+    CommunicationRequest,
+    CommunicationRequestPayload,
+)
 from fhir.resources.R4B.condition import Condition
 from fhir.resources.R4B.contactpoint import ContactPoint
 from fhir.resources.R4B.coverage import Coverage
@@ -33,6 +39,10 @@ from fhir.resources.R4B.coverageeligibilityrequest import (
     CoverageEligibilityRequestSupportingInfo,
 )
 from fhir.resources.R4B.coverageeligibilityresponse import CoverageEligibilityResponse
+from fhir.resources.R4B.documentreference import (
+    DocumentReference,
+    DocumentReferenceContent,
+)
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.meta import Meta
@@ -44,23 +54,29 @@ from fhir.resources.R4B.practitioner import Practitioner
 from fhir.resources.R4B.quantity import Quantity
 from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
+from fhir.resources.R4B.task import Task, TaskInput, TaskOutput
 from pydantic import UUID4, BaseModel
 
 from care.emr.models.base import EMRBaseModel
 from care.emr.models.condition import Condition as ConditionModel
 from care.emr.models.file_upload import FileUpload
+from care.emr.models.file_upload import FileUpload as FileUploadModel
 from care.emr.models.patient import Patient as PatientModel
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
 from nhcx.models.claim import Claim as ClaimModel
 from nhcx.models.claim import ClaimResponse as ClaimResponseModel
+from nhcx.models.communication import Communication as CommunicationModel
+from nhcx.models.communication import CommunicationRequest as CommunicationRequestModel
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityRequest as CoverageEligibilityRequestModel,
 )
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
+from nhcx.models.task import Task as TaskModel
+from nhcx.models.task import TaskUseCaseChoices
 from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
 
@@ -350,6 +366,26 @@ class Fhir:
             )
         )
 
+    @cache_profiles(DocumentReference.get_resource_type())
+    def _document_reference(self, file: FileUploadModel):
+        id = str(file.external_id)
+        content_type, content = file.files_manager.file_contents(file)
+
+        return DocumentReference(
+            id=id,
+            identifier=[Identifier(value=id)],
+            status="current",
+            type=CodeableConcept(text=file.internal_name.split(".")[0]),
+            content=[
+                DocumentReferenceContent(
+                    attachment=Attachment(
+                        contentType=content_type, data=base64.b64encode(content)
+                    )
+                )
+            ],
+            author=[self._reference(self._practitioner(file.created_by))],
+        )
+
     class CoverageModel(BaseModel):
         external_id: UUID4
         policy: Policy
@@ -388,6 +424,72 @@ class Fhir:
             status="active",
         )
 
+    @cache_profiles(CommunicationRequest.get_resource_type())
+    def _communication_request(self, request: CommunicationRequestModel):
+        id = str(request.external_id)
+
+        return CommunicationRequest(
+            id=id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/CommunicationRequest"
+                ],
+            ),
+            identifier=[Identifier(value=request.identifier)],
+            status=request.status,
+            priority=request.priority,
+            category=[CodeableConcept(**category) for category in request.category]
+            if request.category
+            else None,
+            authoredOn=request.authored_on.isoformat() if request.authored_on else None,
+            payload=[
+                CommunicationRequestPayload(**payload) for payload in request.payload
+            ]
+            if request.payload
+            else None,
+        )
+
+    @cache_profiles(Communication.get_resource_type())
+    def _communication(
+        self, communication: CommunicationModel, for_content_transfer=False
+    ):
+        id = str(communication.external_id)
+
+        return Communication(
+            id=id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Communication"
+                ],
+            ),
+            identifier=[Identifier(value=id)],
+            status=communication.status,
+            priority=communication.priority,
+            category=[
+                self._coding_to_codable_concept(CodingSpec(**coding))
+                for coding in communication.category
+            ],
+            sent=communication.sent.isoformat() if communication.sent else None,
+            payload=[
+                CommunicationPayload(
+                    contentString=payload.get("content_string"),
+                    contentAttachment=self._attachment(
+                        FileUpload.objects.filter(
+                            external_id=payload.get("content_attachment")
+                        ).first()
+                    )
+                    if payload.get("content_attachment")
+                    else None,
+                )
+                for payload in communication.payload
+            ],
+            basedOn=[
+                self._reference(self._communication_request(communication.based_on))
+            ]
+            if not for_content_transfer
+            else None,
+        )
+
     def _policy_to_coverage(self, policy: Policy, insurer: Participant):
         if policy.sno not in self._policies_external_id_map:
             self._policies_external_id_map[policy.sno] = uuid4()
@@ -408,7 +510,7 @@ class Fhir:
                 ],
             ),
             identifier=[Identifier(value=id)],
-            status=request.coverage.status,
+            status=request.status,
             priority=self._coding_to_codable_concept(
                 CodingSpec(
                     system="http://terminology.hl7.org/CodeSystem/processpriority",
@@ -426,9 +528,25 @@ class Fhir:
             supportingInfo=[
                 CoverageEligibilityRequestSupportingInfo(
                     sequence=supporting_info.get("sequence"),
-                    information=[
-                        # FIXME: add support for observation and document reference
-                    ],
+                    information=self._reference(
+                        self._communication(
+                            CommunicationModel(
+                                external_id=uuid4(),
+                                status="completed",
+                                payload=[
+                                    {
+                                        "content_string": supporting_info.get(
+                                            "value_string"
+                                        ),
+                                        "content_attachment": supporting_info.get(
+                                            "value_attachment"
+                                        ),
+                                    }
+                                ],
+                            ),
+                            for_content_transfer=True,
+                        ),
+                    ),
                 )
                 for supporting_info in request.supporting_info
             ],
@@ -743,6 +861,35 @@ class Fhir:
             ),
         )
 
+    def _task(self, task: TaskModel):
+        id = str(task.external_id)
+
+        if task.use_case == TaskUseCaseChoices.COMMUNICATION_RESPONSE:
+            self._communication(task.focus)
+
+        return Task(
+            id=id,
+            meta=Meta(
+                profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Task"],
+            ),
+            identifier=[Identifier(value=id)],
+            status=task.status,
+            intent=task.intent,
+            priority=task.priority,
+            code=CodeableConcept(**task.code) if task.code else None,
+            authoredOn=task.authored_on,
+            description=task.description,
+            reasonCode=CodeableConcept(**task.reason_code)
+            if task.reason_code
+            else None,
+            input=[TaskInput(**_input) for _input in task.input]
+            if task.input
+            else None,
+            output=[TaskOutput(**output) for output in task.output]
+            if task.output
+            else None,
+        )
+
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
 
@@ -787,6 +934,26 @@ class Fhir:
             timestamp=datetime.now(UTC).isoformat(),
             entry=[
                 self._bundle_entry(self._claim(claim)),
+                *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+            ],
+        )
+
+    def create_task_bundle(self, task: TaskModel):
+        id = str(task.external_id)
+
+        return Bundle(
+            id=id,
+            meta=Meta(
+                profile=[
+                    "https://ig.hcxprotocol.io/v0.7.1/StructureDefinition-ClaimRequestBundle.html"
+                ],
+                lastUpdated=task.modified_date.isoformat(),
+            ),
+            identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
+            type="collection",
+            timestamp=datetime.now(UTC).isoformat(),
+            entry=[
+                self._bundle_entry(self._task(task)),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
         )
@@ -885,3 +1052,84 @@ class Fhir:
         )
 
         return (claim_response_instance, claim_instance)
+
+    def process_communication_request(
+        self, response: dict, headers: dict | None = None
+    ):
+        # Using construct to avoid fhir validation errors
+        communication_request_bundle = Bundle.construct(**response)
+
+        task = Task.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "Task",
+                    communication_request_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        communication_request = CommunicationRequest.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "CommunicationRequest",
+                    communication_request_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        claim_request = Claim.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "Claim",
+                    communication_request_bundle.entry,
+                )
+            ).get("resource")
+        )
+        request_id = claim_request.id
+
+        claim_instance = ClaimModel.objects.filter(external_id=request_id).first()
+
+        with transaction.atomic():
+            # TODO: use TaskSpec to create the instance
+            task_instance = TaskModel.objects.create(
+                identifier=task.id,
+                status=task.status,
+                intent=task.intent,
+                priority=task.priority,
+                code=task.code,
+                authored_on=task.authoredOn,
+                description=task.description,
+                reason_code=task.reasonCode,
+                input=task.input,
+                output=task.output,
+                claim=claim_instance,
+                use_case=TaskUseCaseChoices.COMMUNICATION_REQUEST,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            # TODO: use CommunicationRequestSpec to create the instance
+            communication_request_instance = CommunicationRequestModel.objects.create(
+                identifier=communication_request.id,
+                status=communication_request.status,
+                priority=communication_request.priority,
+                category=communication_request.category,
+                authored_on=communication_request.authoredOn,
+                payload=communication_request.payload,
+                based_on=task_instance,
+                about=claim_instance,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            task_instance.focus = communication_request_instance
+            task_instance.save()
+
+        return (task_instance, communication_request_instance, claim_instance)

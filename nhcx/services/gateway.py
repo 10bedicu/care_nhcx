@@ -47,7 +47,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"payload": payload},
+            {"type": "JWEPayload", "payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -62,7 +62,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"payload": payload},
+            {"type": "JWEPayload", "payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -77,7 +77,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"payload": payload},
+            {"type": "JWEPayload", "payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -92,7 +92,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"payload": payload},
+            {"type": "JWEPayload", "payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -107,7 +107,22 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"payload": payload},
+            {"type": "JWEPayload", "payload": payload},
+            headers=GatewayService.headers(),
+        )
+
+        if response.status_code != status.HTTP_202_ACCEPTED:
+            raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def communication__on_request(payload: str) -> dict:
+        path = "/v1/communication/on_request"
+
+        response = GatewayService.request.post(
+            path,
+            {"type": "JWEPayload", "payload": payload},
             headers=GatewayService.headers(),
         )
 

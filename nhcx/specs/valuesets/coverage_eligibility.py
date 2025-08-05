@@ -1,6 +1,7 @@
 from care.emr.registries.care_valueset.care_valueset import CareValueset
 from care.emr.resources.common.valueset import ValueSetCompose, ValueSetInclude
 from care.emr.resources.valueset.spec import ValueSetStatusOptions
+from care_nhcx.nhcx.specs.valuesets.claim import NHCX_CLAIM_TYPE_VALUESET
 
 NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_DIAGNOSIS_CODE_VALUESET = CareValueset(
     "Coverage Eligibility Request Item Diagnosis Code",
@@ -127,3 +128,12 @@ NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.register_valueset(
 )
 
 NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.register_as_system()
+
+
+NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)
+
+NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET = (
+    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+)

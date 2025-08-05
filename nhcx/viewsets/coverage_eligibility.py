@@ -10,7 +10,6 @@ from rest_framework.response import Response
 from care.emr.api.viewsets.base import (
     EMRBaseViewSet,
     EMRCreateMixin,
-    EMRDestroyMixin,
     EMRListMixin,
     EMRRetrieveMixin,
 )
@@ -20,13 +19,13 @@ from nhcx.specs.coverage_eligibility import (
     CoverageEligibilityRequestCreateSpec,
     CoverageEligibilityRequestListSpec,
     CoverageEligibilityRequestRetrieveSpec,
-    CoverageEligibilityRequestStatusChoices,
 )
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
 
 class CoverageEligibilityRequestFilter(filters.FilterSet):
+    encounter = filters.UUIDFilter(field_name="encounter__external_id")
     patient = filters.UUIDFilter(field_name="patient__external_id")
     facility = filters.UUIDFilter(field_name="provider__facility__external_id")
 
@@ -35,7 +34,6 @@ class CoverageEligibilityRequestViewSet(
     EMRCreateMixin,
     EMRListMixin,
     EMRRetrieveMixin,
-    EMRDestroyMixin,
     EMRBaseViewSet,
 ):
     database_model = CoverageEligibilityRequest
@@ -48,11 +46,6 @@ class CoverageEligibilityRequestViewSet(
         "created_date",
         "modified_date",
     ]
-
-    def perform_destroy(self, instance):
-        instance.status = CoverageEligibilityRequestStatusChoices.ENTERED_IN_ERROR
-        instance.save()
-        super().perform_destroy(instance)
 
     @extend_schema(
         request=None,
@@ -87,11 +80,12 @@ class CoverageEligibilityRequestViewSet(
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
+            data=fhir_payload,
             sender_code=coverage_eligibility_request.provider.participant_code,
             recipient_code=coverage_eligibility_request.insurer.get("participant_code"),
             patient_abha_number=coverage_eligibility_request.patient.abha_number.abha_number,
             correlation_id=str(coverage_eligibility_request.external_id),
-            data=fhir_payload,
+            status="request.initiated",
         )
 
         _response = GatewayService.coverage_eligibility__check(encrypted_payload)

@@ -310,15 +310,16 @@ class ClaimCreateSpec(ClaimBaseSpec):
         return value
 
     def perform_extra_deserialization(self, is_update, obj):
-        obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
+        if self.encounter:
+            obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
+
         obj.patient = get_object_or_404(Patient, external_id=self.patient)
         obj.provider = get_object_or_404(Provider, facility__external_id=self.facility)
 
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1000003538@hcx"  # TODO: remove this after testing
-                    or self.insurance[0].policy.payerid
+                    participant_code="1000003538@hcx"  # TODO: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
@@ -336,9 +337,15 @@ class ClaimResponseRetrieveSpec(EMRResource):
     add_item: dict | None = None
     total: dict | None = None
     error: dict | None = None
+    request: UUID4
 
     created_date: datetime | None = None
     modified_date: datetime | None = None
+
+    @classmethod
+    def perform_extra_serialization(cls, mapping, obj):
+        mapping["id"] = obj.external_id
+        mapping["request"] = obj.request.external_id
 
 
 class ClaimListSpec(ClaimBaseSpec):
@@ -360,7 +367,7 @@ class ClaimListSpec(ClaimBaseSpec):
 
     provider: UUID4
     patient: UUID4
-    encounter: UUID4
+    encounter: UUID4 | None = None
     latest_response: dict | None = None
     created_by: dict | None = None
     updated_by: dict | None = None
@@ -368,6 +375,9 @@ class ClaimListSpec(ClaimBaseSpec):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
+        mapping["provider"] = obj.provider.external_id
+        mapping["patient"] = obj.patient.external_id
+        mapping["encounter"] = obj.encounter.external_id if obj.encounter else None
 
         latest_response = (
             ClaimResponse.objects.filter(request=obj).order_by("-created_date").first()
@@ -383,46 +393,10 @@ class ClaimListSpec(ClaimBaseSpec):
             mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
 
 
-class ClaimRetrieveSpec(ClaimBaseSpec):
-    use: str
-    status: str
-    priority: str
-    type: dict | None = None
-    insurer: dict
-    billable_period: dict | None = None
-    related: list[dict] = []
-    care_team: list[dict] = []
-    supporting_info: list[dict] = []
-    procedure: list[dict] = []
-    diagnosis: list[dict] = []
-    insurance: list[dict] = []
-    item: list[dict] = []
-    accident: dict | None = None
-    payee: dict | None = None
-
-    provider: UUID4
-    patient: UUID4
-    encounter: UUID4
-    latest_response: dict | None = None
-    created_by: dict | None = None
-    updated_by: dict | None = None
-
+class ClaimRetrieveSpec(ClaimListSpec):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):  # noqa: PLR0912
-        mapping["id"] = obj.external_id
-
-        latest_response = (
-            ClaimResponse.objects.filter(request=obj).order_by("-created_date").first()
-        )
-        if latest_response:
-            mapping["latest_response"] = ClaimResponseRetrieveSpec.serialize(
-                latest_response
-            ).to_json()
-
-        if obj.created_by:
-            mapping["created_by"] = UserSpec.serialize(obj.created_by).to_json()
-        if obj.updated_by:
-            mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
+        super().perform_extra_serialization(mapping, obj)
 
         if obj.related:
             mapping["related"] = []

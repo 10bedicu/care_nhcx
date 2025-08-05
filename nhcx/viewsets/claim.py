@@ -10,19 +10,19 @@ from rest_framework.response import Response
 from care.emr.api.viewsets.base import (
     EMRBaseViewSet,
     EMRCreateMixin,
-    EMRDestroyMixin,
     EMRListMixin,
     EMRRetrieveMixin,
 )
 from nhcx.models.claim import Claim
+from nhcx.models.task import Task
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.claim import (
     ClaimCreateSpec,
     ClaimListSpec,
     ClaimRetrieveSpec,
-    ClaimStatusChoices,
     ClaimUseChoices,
 )
+from nhcx.specs.task import TaskListSpec
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -37,7 +37,6 @@ class ClaimViewSet(
     EMRCreateMixin,
     EMRListMixin,
     EMRRetrieveMixin,
-    EMRDestroyMixin,
     EMRBaseViewSet,
 ):
     database_model = Claim
@@ -50,11 +49,6 @@ class ClaimViewSet(
         "created_date",
         "modified_date",
     ]
-
-    def perform_destroy(self, instance):
-        instance.status = ClaimStatusChoices.ENTERED_IN_ERROR
-        instance.save()
-        super().perform_destroy(instance)
 
     @extend_schema(
         request=None,
@@ -83,11 +77,13 @@ class ClaimViewSet(
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
+            data=fhir_payload,
             sender_code=claim.provider.participant_code,
             recipient_code=claim.insurer.get("participant_code"),
             patient_abha_number=claim.patient.abha_number.abha_number,
             correlation_id=str(claim.external_id),
-            data=fhir_payload,
+            status="request.initiated",
+            workflow_id="15" if claim.use == ClaimUseChoices.CLAIM else "12",
         )
 
         _response = None
@@ -102,3 +98,23 @@ class ClaimViewSet(
             ClaimRetrieveSpec.serialize(claim).model_dump(mode="json"),
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        request=None,
+        responses={200: TaskListSpec},
+    )
+    @action(detail=True, methods=["GET"])
+    def tasks(self, request, *args, **kwargs):
+        claim = self.get_object()
+
+        tasks = Task.objects.filter(claim=claim)
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(tasks, request)
+
+        if page is not None:
+            data = [TaskListSpec.serialize(task).to_json() for task in page]
+            return paginator.get_paginated_response(data)
+
+        data = [TaskListSpec.serialize(task).to_json() for task in tasks]
+        return Response(data, status=status.HTTP_200_OK)
