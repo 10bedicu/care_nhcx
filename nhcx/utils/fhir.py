@@ -45,6 +45,7 @@ from fhir.resources.R4B.documentreference import (
 )
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
+from fhir.resources.R4B.insuranceplan import InsurancePlan
 from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.money import Money
 from fhir.resources.R4B.organization import Organization
@@ -76,6 +77,7 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
+from nhcx.models.insurance_plan import InsurancePlan as InsurancePlanModel
 from nhcx.models.payment import PaymentReconciliation as PaymentReconciliationModel
 from nhcx.models.task import Task as TaskModel
 from nhcx.models.task import TaskUseCaseChoices
@@ -961,7 +963,7 @@ class Fhir:
         )
 
     def process_coverage_eligibility_check_response(
-        self, response: dict, headers: dict | None = None
+        self, response: dict, headers: dict
     ):
         # Using construct to avoid fhir validation errors
         coverage_eligibility_response_bundle = Bundle.construct(**response)
@@ -1011,7 +1013,7 @@ class Fhir:
             coverage_eligibility_request_instance,
         )
 
-    def process_claim_response(self, response: dict, headers: dict | None = None):
+    def process_claim_response(self, response: dict, headers: dict):
         # Using construct to avoid fhir validation errors
         claim_response_bundle = Bundle.construct(**response)
 
@@ -1055,9 +1057,7 @@ class Fhir:
 
         return (claim_response_instance, claim_instance)
 
-    def process_communication_request(
-        self, response: dict, headers: dict | None = None
-    ):
+    def process_communication_request(self, response: dict, headers: dict):
         # Using construct to avoid fhir validation errors
         communication_request_bundle = Bundle.construct(**response)
 
@@ -1136,9 +1136,7 @@ class Fhir:
 
         return (task_instance, communication_request_instance, claim_instance)
 
-    def process_payment_notice_request(
-        self, response: dict, headers: dict | None = None
-    ):
+    def process_payment_notice_request(self, response: dict, headers: dict):
         # Using construct to avoid fhir validation errors
         payment_notice_request_bundle = Bundle.construct(**response)
 
@@ -1222,3 +1220,47 @@ class Fhir:
             task_instance.save()
 
         return (task_instance, payment_reconciliation_instance, claim_instance)
+
+    def process_insurance_plan_response(self, response: dict, headers: dict):
+        # Using construct to avoid fhir validation errors
+        insurance_plan_response_bundle = Bundle.construct(**response)
+
+        insurance_plan = InsurancePlan.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "InsurancePlan",
+                    insurance_plan_response_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        task = TaskModel.objects.filter(
+            external_id=headers.get("x-hcx-correlation_id")
+        ).first()
+        if not task:
+            raise Exception("Correlation ID not found")
+
+        insurance_plan_instance = InsurancePlanModel.objects.create(
+            identifier=insurance_plan_response_bundle.id,
+            extension=insurance_plan.extension,
+            product_identifier=insurance_plan.identifier,
+            status=insurance_plan.status,
+            type=insurance_plan.type,
+            name=insurance_plan.name,
+            alias=insurance_plan.alias,
+            period=insurance_plan.period,
+            contact=insurance_plan.contact,
+            coverage=insurance_plan.coverage,
+            plan=insurance_plan.plan,
+            request=task,
+            meta={
+                "raw_response": response,
+                "raw_headers": headers,
+            },
+        )
+
+        task.focus = insurance_plan_instance
+        task.save()
+
+        return (task, insurance_plan_instance)

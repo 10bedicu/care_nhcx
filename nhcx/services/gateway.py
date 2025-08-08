@@ -66,7 +66,7 @@ class GatewayService:
             headers=GatewayService.headers(),
         )
 
-        if response.status_code != status.HTTP_200_OK:
+        if response.status_code != status.HTTP_202_ACCEPTED:
             raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
 
         return response.json()

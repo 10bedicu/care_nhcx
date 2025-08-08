@@ -319,7 +319,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1000003538@hcx"  # TODO: replace this with self.insurance[0].policy.payerid after testing
+                    participant_code="1000003538@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")

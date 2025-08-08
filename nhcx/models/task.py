@@ -32,7 +32,7 @@ class Task(EMRBaseModel):
         "nhcx.Task", on_delete=models.CASCADE, null=True, blank=True
     )
     claim = models.ForeignKey(
-        "nhcx.Claim", on_delete=models.CASCADE, null=False, blank=False
+        "nhcx.Claim", on_delete=models.CASCADE, null=True, blank=True
     )
     use_case = models.CharField(
         max_length=32, choices=TaskUseCaseChoices.choices, null=False, blank=False

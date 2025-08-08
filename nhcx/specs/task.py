@@ -5,12 +5,14 @@ from pydantic import UUID4
 from care.emr.resources.base import EMRResource
 from care.emr.resources.user.spec import UserSpec
 from nhcx.models.communication import Communication, CommunicationRequest
+from nhcx.models.insurance_plan import InsurancePlan
 from nhcx.models.payment import PaymentReconciliation
 from nhcx.models.task import Task
 from nhcx.specs.communication import (
     CommunicationRequestRetrieveSpec,
     CommunicationRetrieveSpec,
 )
+from nhcx.specs.insurance_plan import InsurancePlanRetrieveSpec
 from nhcx.specs.payment import PaymentReconciliationRetrieveSpec
 
 
@@ -36,14 +38,14 @@ class TaskListSpec(TaskBaseSpec):
     input: list[dict] | None = None
     output: list[dict] | None = None
     use_case: str
-    claim: UUID4
+    claim: UUID4 | None = None
     part_of: UUID4 | None = None
     focus: UUID4 | None = None
 
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
-        mapping["claim"] = obj.claim.external_id
+        mapping["claim"] = obj.claim.external_id if obj.claim else None
         mapping["part_of"] = obj.part_of.external_id if obj.part_of else None
 
         if obj.created_by:
@@ -64,3 +66,11 @@ class TaskListSpec(TaskBaseSpec):
                 mapping["focus"] = PaymentReconciliationRetrieveSpec.serialize(
                     obj.focus
                 ).to_json()
+            if isinstance(obj.focus, InsurancePlan):
+                mapping["focus"] = InsurancePlanRetrieveSpec.serialize(
+                    obj.focus
+                ).to_json()
+
+
+class TaskRetrieveSpec(TaskListSpec):
+    pass

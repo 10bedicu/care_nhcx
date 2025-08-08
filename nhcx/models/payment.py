@@ -14,7 +14,6 @@ class PaymentReconciliation(EMRBaseModel):
     payment_identifier = models.JSONField(null=True, blank=True)
     detail = models.JSONField(default=list, null=True, blank=True)
     process_note = models.JSONField(default=list, null=True, blank=True)
-
     request = models.ForeignKey(
         "nhcx.Task", on_delete=models.CASCADE, null=False, blank=False
     )

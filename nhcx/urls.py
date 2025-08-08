@@ -5,6 +5,7 @@ from nhcx.viewsets.claim import ClaimViewSet
 from nhcx.viewsets.communication import CommunicationViewSet
 from nhcx.viewsets.coverage_eligibility import CoverageEligibilityRequestViewSet
 from nhcx.viewsets.gateway import GatewayViewSet
+from nhcx.viewsets.insurance_plan import InsurancePlanViewSet
 from nhcx.viewsets.payment import PaymentViewSet
 
 router = DefaultRouter()
@@ -18,6 +19,7 @@ router.register(
 router.register(r"claim", ClaimViewSet, basename="nhcx-claim")
 router.register(r"communication", CommunicationViewSet, basename="nhcx-communication")
 router.register(r"payment", PaymentViewSet, basename="nhcx-payment")
+router.register(r"insurance-plan", InsurancePlanViewSet, basename="nhcx-insurance-plan")
 
 
 callback_router = DefaultRouter(trailing_slash=False)
