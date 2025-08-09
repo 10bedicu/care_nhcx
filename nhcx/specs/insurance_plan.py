@@ -10,7 +10,7 @@ from nhcx.services.types.participant import Policy
 
 class InsurancePlanRequestBody(BaseModel):
     policy: Policy
-    provider_id: str
+    facility: str
 
 
 class InsurancePlanBaseSpec(EMRResource):

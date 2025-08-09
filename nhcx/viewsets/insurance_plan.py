@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
+from nhcx.models.provider import Provider
 from nhcx.models.task import Task, TaskUseCaseChoices
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.insurance_plan import (
@@ -38,6 +39,7 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     @action(detail=False, methods=["POST"])
     def request(self, request, *args, **kwargs):
         data = InsurancePlanRequestBody(**request.data)
+        provider = get_object_or_404(Provider, facility__external_id=data.facility)
 
         task = Task.objects.create(
             identifier=str(data.policy.sno),  # This is set to filter the insurance plan
@@ -89,7 +91,7 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
 
         encrypted_payload = NHCX.encrypt(
             data=fhir_payload,
-            sender_code=data.provider_id,
+            sender_code=provider.participant_code,
             recipient_code="1000003538@hcx",  # TODO: REPLACE_AFTER_TESTING: replace this with data.policy.payerid after testing
             patient_abha_number=data.policy.abhanumber,
             correlation_id=str(task.external_id),
