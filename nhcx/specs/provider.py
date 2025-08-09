@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from abdm.models.health_facility import HealthFacility
 from pydantic import UUID4, field_validator
 
@@ -11,6 +13,9 @@ class BaseProviderSpec(EMRResource):
     __model__ = Provider
     __exclude__ = ["facility"]
     id: UUID4 = None
+
+    created_date: datetime | None = None
+    modified_date: datetime | None = None
 
 
 class ProviderCreateSpec(BaseProviderSpec):

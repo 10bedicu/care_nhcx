@@ -7,9 +7,11 @@ from nhcx.viewsets.coverage_eligibility import CoverageEligibilityRequestViewSet
 from nhcx.viewsets.gateway import GatewayViewSet
 from nhcx.viewsets.insurance_plan import InsurancePlanViewSet
 from nhcx.viewsets.payment import PaymentViewSet
+from nhcx.viewsets.provider import ProviderViewSet
 
 router = DefaultRouter()
 
+router.register("provider", ProviderViewSet, basename="nhcx-provider")
 router.register("gateway", GatewayViewSet, basename="nhcx-gateway")
 router.register(
     r"coverage-eligibility-request",
