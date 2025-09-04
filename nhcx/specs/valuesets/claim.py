@@ -138,17 +138,18 @@ NHCX_CLAIM_ITEM_CATEGORY_VALUESET.register_valueset(
                 filter=[{"property": "concept", "op": "is-a", "value": "224891009"}],
             ),
         ],
-        exclude=[
-            ValueSetInclude(
-                system="http://snomed.info/sct",
-                concept=[
-                    {
-                        "code": "224891009",
-                        "display": "Healthcare services (qualifier value)",
-                    },
-                ],
-            )
-        ],
+        # FIXME: Enable this after testing and fix it
+        # exclude=[
+        #     ValueSetInclude(
+        #         system="http://snomed.info/sct",
+        #         concept=[
+        #             {
+        #                 "code": "224891009",
+        #                 "display": "Healthcare services (qualifier value)",
+        #             },
+        #         ],
+        #     )
+        # ],
     )
 )
 
@@ -168,38 +169,57 @@ NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.register_valueset(
                 system="http://snomed.info/sct",
                 filter=[
                     {"property": "concept", "op": "is-a", "value": "387713003"},
-                    {"property": "concept", "op": "is-a", "value": "305056002"},
-                    {"property": "concept", "op": "is-a", "value": "43741000"},
-                    {"property": "concept", "op": "is-a", "value": "285201006"},
-                    {"property": "concept", "op": "is-a", "value": "63653004"},
-                    {"property": "concept", "op": "is-a", "value": "440654001"},
-                    {"property": "concept", "op": "is-a", "value": "440655000"},
                 ],
             ),
-        ],
-        exclude=[
             ValueSetInclude(
                 system="http://snomed.info/sct",
-                concept=[
-                    {
-                        "code": "387713003",
-                        "display": "Surgical procedure (procedure)",
-                    },
-                    {
-                        "code": "63653004",
-                        "display": "Biomedical device (physical object)",
-                    },
-                    {
-                        "code": "305056002",
-                        "display": "Admission procedure (procedure)",
-                    },
-                    {
-                        "code": "43741000",
-                        "display": "Site of care (environment)",
-                    },
-                ],
+                filter=[{"property": "concept", "op": "is-a", "value": "305056002"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "43741000"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "285201006"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "63653004"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "440654001"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "440655000"}],
             ),
         ],
+        # FIXME: Enable this after testing and fix it
+        # exclude=[
+        #     ValueSetInclude(
+        #         system="http://snomed.info/sct",
+        #         concept=[
+        #             {
+        #                 "code": "387713003",
+        #                 "display": "Surgical procedure (procedure)",
+        #             },
+        #             {
+        #                 "code": "63653004",
+        #                 "display": "Biomedical device (physical object)",
+        #             },
+        #             {
+        #                 "code": "305056002",
+        #                 "display": "Admission procedure (procedure)",
+        #             },
+        #             {
+        #                 "code": "43741000",
+        #                 "display": "Site of care (environment)",
+        #             },
+        #         ],
+        #     ),
+        # ],
     )
 )
 
@@ -241,12 +261,13 @@ NHCX_CLAIM_ACCIDENT_TYPE_VALUESET.register_valueset(
                 ],
             )
         ],
-        exclude=[
-            ValueSetInclude(
-                system="http://terminology.hl7.org/CodeSystem/v3-ActCode",
-                concept=[{"code": "_ActIncidentCode", "display": "ActIncidentCode"}],
-            )
-        ],
+        # FIXME: Enable this after testing and fix it
+        # exclude=[
+        #     ValueSetInclude(
+        #         system="http://terminology.hl7.org/CodeSystem/v3-ActCode",
+        #         concept=[{"code": "_ActIncidentCode", "display": "ActIncidentCode"}],
+        #     )
+        # ],
     )
 )
 
@@ -262,6 +283,7 @@ NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET = CareValueset(
 NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET.register_valueset(
     ValueSetCompose(
         include=[
+            # FIXME: Check if this is all the values
             ValueSetInclude(
                 system="http://snomed.info/sct",
                 concept=[
@@ -291,6 +313,7 @@ NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET = CareValueset(
 )
 
 NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET.register_valueset(
+    # FIXME: Enable this after testing and fix it
     ValueSetCompose(
         include=[
             # ValueSetInclude(
@@ -336,11 +359,12 @@ NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET = CareValueset(
 )
 
 NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET.register_valueset(
+    # FIXME: Enable this after testing and fix it
     ValueSetCompose(
         include=[
-            ValueSetInclude(
-                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
-            ),
+            # ValueSetInclude(
+            #     system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
+            # ),
             ValueSetInclude(
                 system="http://terminology.hl7.org/CodeSystem/v2-0203",
                 concept=[
@@ -348,9 +372,9 @@ NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET.register_valueset(
                     {"code": "PPN", "display": "Passport number"},
                 ],
             ),
-            ValueSetInclude(
-                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
-            ),
+            # ValueSetInclude(
+            #     system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
+            # ),
         ]
     )
 )
@@ -454,33 +478,15 @@ NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.register_valueset(
 NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.register_as_system()
 
 
-NHCX_CLAIM_ACCIDENT_TYPE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_ITEM_CATEGORY_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_PROCEDURE_CODE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_PROCEDURE_TYPE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_PROGRAM_CODE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
+# NHCX_CLAIM_ACCIDENT_TYPE_VALUESET = (
+#     NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+# )
+# NHCX_CLAIM_PROCEDURE_CODE_VALUESET = (
+#     NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+# )
+# NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET = (
+#     NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+# )
+# NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET = (
+#     NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
+# )

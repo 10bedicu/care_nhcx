@@ -1,7 +1,6 @@
 from care.emr.registries.care_valueset.care_valueset import CareValueset
 from care.emr.resources.common.valueset import ValueSetCompose, ValueSetInclude
 from care.emr.resources.valueset.spec import ValueSetStatusOptions
-from nhcx.specs.valuesets.claim import NHCX_CLAIM_TYPE_VALUESET
 
 NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_DIAGNOSIS_CODE_VALUESET = CareValueset(
     "Coverage Eligibility Request Item Diagnosis Code",
@@ -62,17 +61,18 @@ NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET.register_valueset(
                 filter=[{"property": "concept", "op": "is-a", "value": "224891009"}],
             ),
         ],
-        exclude=[
-            ValueSetInclude(
-                system="http://snomed.info/sct",
-                concept=[
-                    {
-                        "code": "224891009",
-                        "display": "Healthcare services (qualifier value)",
-                    },
-                ],
-            )
-        ],
+        # FIXME: Enable this after testing and fix it
+        # exclude=[
+        #     ValueSetInclude(
+        #         system="http://snomed.info/sct",
+        #         concept=[
+        #             {
+        #                 "code": "224891009",
+        #                 "display": "Healthcare services (qualifier value)",
+        #             },
+        #         ],
+        #     )
+        # ],
     )
 )
 
@@ -90,50 +90,58 @@ NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.register_valueset(
         include=[
             ValueSetInclude(
                 system="http://snomed.info/sct",
-                filter=[
-                    {"property": "concept", "op": "is-a", "value": "387713003"},
-                    {"property": "concept", "op": "is-a", "value": "305056002"},
-                    {"property": "concept", "op": "is-a", "value": "43741000"},
-                    {"property": "concept", "op": "is-a", "value": "285201006"},
-                    {"property": "concept", "op": "is-a", "value": "63653004"},
-                    {"property": "concept", "op": "is-a", "value": "440654001"},
-                    {"property": "concept", "op": "is-a", "value": "440655000"},
-                ],
+                filter=[{"property": "concept", "op": "is-a", "value": "387713003"}],
             ),
-        ],
-        exclude=[
             ValueSetInclude(
                 system="http://snomed.info/sct",
-                concept=[
-                    {
-                        "code": "387713003",
-                        "display": "Surgical procedure (procedure)",
-                    },
-                    {
-                        "code": "63653004",
-                        "display": "Biomedical device (physical object)",
-                    },
-                    {
-                        "code": "305056002",
-                        "display": "Admission procedure (procedure)",
-                    },
-                    {
-                        "code": "43741000",
-                        "display": "Site of care (environment)",
-                    },
-                ],
+                filter=[{"property": "concept", "op": "is-a", "value": "305056002"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "43741000"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "285201006"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "63653004"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "440654001"}],
+            ),
+            ValueSetInclude(
+                system="http://snomed.info/sct",
+                filter=[{"property": "concept", "op": "is-a", "value": "440655000"}],
             ),
         ],
+        # FIXME: Enable this after testing and fix it
+        # exclude=[
+        #     ValueSetInclude(
+        #         system="http://snomed.info/sct",
+        #         concept=[
+        #             {
+        #                 "code": "387713003",
+        #                 "display": "Surgical procedure (procedure)",
+        #             },
+        #             {
+        #                 "code": "63653004",
+        #                 "display": "Biomedical device (physical object)",
+        #             },
+        #             {
+        #                 "code": "305056002",
+        #                 "display": "Admission procedure (procedure)",
+        #             },
+        #             {
+        #                 "code": "43741000",
+        #                 "display": "Site of care (environment)",
+        #             },
+        #         ],
+        #     ),
+        # ],
     )
 )
 
 NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.register_as_system()
-
-
-NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
-
-NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET = (
-    NHCX_CLAIM_TYPE_VALUESET  # FIXME: Remove this after testing
-)
