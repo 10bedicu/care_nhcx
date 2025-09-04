@@ -46,6 +46,7 @@ from fhir.resources.R4B.documentreference import (
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
 from fhir.resources.R4B.insuranceplan import InsurancePlan
+from fhir.resources.R4B.location import Location
 from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.money import Money
 from fhir.resources.R4B.organization import Organization
@@ -115,7 +116,7 @@ class Fhir:
                 result = func(self, model_instance, *args, **kwargs)
 
                 self._profiles[cache_key] = result
-                self._resource_id_url_map[cache_key] = uuid4()
+                self._resource_id_url_map[cache_key] = str(model_instance.external_id)
                 return result
 
             return wrapper
@@ -132,7 +133,7 @@ class Fhir:
             return ""
 
         key = f"{resource.resource_type}/{resource.id}"
-        return f"urn:uuid:{self._resource_id_url_map.get(key, uuid4())}"
+        return f"urn:uuid:{self._resource_id_url_map.get(key, resource.id or uuid4())}"
 
     def _reference(self, resource: Resource = None):
         if resource is None:
@@ -208,6 +209,11 @@ class Fhir:
 
         return Practitioner(
             id=id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Practitioner"
+                ],
+            ),
             identifier=[
                 Identifier(
                     value=id,
@@ -249,6 +255,11 @@ class Fhir:
 
         return Organization(
             id=id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
+                ],
+            ),
             identifier=[
                 # FIXME: add health facility id
                 Identifier(
@@ -295,34 +306,66 @@ class Fhir:
             else None,
         )
 
+    @cache_profiles(Location.get_resource_type())
+    def _location(self, facility: FacilityModel):
+        id = str(facility.external_id)
+
+        return Location(
+            id=id,
+            identifier=[
+                # FIXME: add health facility id
+                Identifier(
+                    system=f"{CARE_IDENTIFIER_SYSTEM}/facility",
+                    value=id,
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="FI",
+                                display="Facility ID",
+                            )
+                        ]
+                    ),
+                )
+            ],
+            type=[
+                CodeableConcept(
+                    coding=[
+                        Coding(
+                            system="http://terminology.hl7.org/CodeSystem/organization-type",
+                            code="prov",
+                            display="Healthcare Provider",
+                        )
+                    ]
+                )
+            ],
+            name=facility.name,
+            telecom=[
+                *(
+                    [ContactPoint(system="phone", value=facility.phone_number)]
+                    if facility.phone_number
+                    else []
+                )
+            ],
+            address=Address(
+                line=[facility.address],
+                postalCode=facility.pincode,
+                country="IN",
+            )
+            if facility.address
+            else None,
+        )
+
     @cache_profiles(Condition.get_resource_type())
     def _condition(self, condition: ConditionModel):
         id = str(condition.external_id)
 
         return Condition(
             id=id,
+            meta=Meta(
+                profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Condition"],
+            ),
             # FIXME: expand this
-            # identifier=[Identifier(value=id)],
-            # category=[
-            #     CodeableConcept(
-            #         coding=[
-            #             Coding(
-            #                 system="http://terminology.hl7.org/CodeSystem/condition-category",
-            #                 code=condition.category,
-            #                 display=condition.category,
-            #             )
-            #         ],
-            #     )
-            # ],
-            # verificationStatus=CodeableConcept(
-            #     coding=[
-            #         Coding(
-            #             system="http://terminology.hl7.org/CodeSystem/condition-ver-status",
-            #             code=condition.verification_status,
-            #             display=condition.verification_status,
-            #         )
-            #     ]
-            # ),
             code=CodeableConcept(
                 coding=[Coding(**condition.code)],
             ),
@@ -377,6 +420,11 @@ class Fhir:
 
         return DocumentReference(
             id=id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentReference"
+                ],
+            ),
             identifier=[Identifier(value=id)],
             status="current",
             type=CodeableConcept(text=file.internal_name.split(".")[0]),
@@ -529,6 +577,7 @@ class Fhir:
             insurer=self._reference(
                 self._participant_to_organization(Participant(**request.insurer))
             ),
+            facility=self._reference(self._location(request.provider.facility)),
             supportingInfo=[
                 CoverageEligibilityRequestSupportingInfo(
                     sequence=supporting_info.get("sequence"),
@@ -830,13 +879,11 @@ class Fhir:
                         value=item.get("quantity", {}).get("value"),
                         unit=item.get("quantity", {})
                         .get("unit", {})
-                        .get("display", "Piece / unit"),
+                        .get("display", "1*"),
                         system=item.get("quantity", {})
                         .get("unit", {})
                         .get("system", "http://unitsofmeasure.org"),
-                        code=item.get("quantity", {})
-                        .get("unit", {})
-                        .get("code", "unit"),
+                        code=item.get("quantity", {}).get("unit", {}).get("code", "1"),
                     )
                     if item.get("quantity")
                     else None,
@@ -907,7 +954,7 @@ class Fhir:
             id=id,
             meta=Meta(
                 profile=[
-                    "https://ig.hcxprotocol.io/v0.7.1/StructureDefinition-CoverageEligibilityRequestBundle.html"
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/CoverageEligibilityRequestBundle"
                 ],
                 lastUpdated=coverage_eligibility_request.modified_date.isoformat(),
             ),
@@ -929,7 +976,7 @@ class Fhir:
             id=id,
             meta=Meta(
                 profile=[
-                    "https://ig.hcxprotocol.io/v0.7.1/StructureDefinition-ClaimRequestBundle.html"
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ClaimBundle"
                 ],
                 lastUpdated=claim.modified_date.isoformat(),
             ),
@@ -949,7 +996,7 @@ class Fhir:
             id=id,
             meta=Meta(
                 profile=[
-                    "https://ig.hcxprotocol.io/v0.7.1/StructureDefinition-ClaimRequestBundle.html"
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/TaskBundle"
                 ],
                 lastUpdated=task.modified_date.isoformat(),
             ),
