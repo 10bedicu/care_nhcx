@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from uuid import uuid4
 
 from django.shortcuts import get_object_or_404
 from pydantic import UUID4, BaseModel, Field, field_validator, model_validator
@@ -23,7 +24,6 @@ from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
 from nhcx.specs.valuesets.claim import (
-    NHCX_CLAIM_ACCIDENT_TYPE_VALUESET,
     NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET,
     NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET,
     NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET,
@@ -31,10 +31,7 @@ from nhcx.specs.valuesets.claim import (
     NHCX_CLAIM_PROCEDURE_CODE_VALUESET,
     NHCX_CLAIM_PROCEDURE_TYPE_VALUESET,
     NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET,
-    NHCX_CLAIM_PROGRAM_CODE_VALUESET,
     NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET,
-    NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET,
-    NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET,
     NHCX_CLAIM_TYPE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
@@ -60,10 +57,9 @@ class ClaimPriorityChoices(str, Enum):
 
 
 class ClaimDiagnosisOnAdmissionChoices(str, Enum):
-    YES = "y"
-    NO = "n"
-    UNKNOWN = "u"
-    UNDETERMINED = "w"
+    YES = "yes"
+    NO = "no"
+    UNKNOWN = "unknown"
 
 
 class ClaimCareTeamSpec(BaseModel):
@@ -172,8 +168,8 @@ class ClaimInsuranceSpec(BaseModel):
 
 class ClaimSupportingInfoSpec(BaseModel):
     sequence: int
-    category: ValueSetBoundCoding[NHCX_CLAIM_SUPPORTING_INFO_CATEGORY_VALUESET.slug]
-    code: ValueSetBoundCoding[NHCX_CLAIM_SUPPORTING_INFO_CODE_VALUESET.slug]
+    category: dict
+    code: dict
     timing: PeriodSpec | None = None
     value_string: str | None = None
     value_attachment: UUID4 | None = None
@@ -209,7 +205,7 @@ class ClaimItemSpec(BaseModel):
         ValueSetBoundCoding[NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.slug] | None
     ) = None
     charge_item: UUID4 | None = None
-    program_code: list[ValueSetBoundCoding[NHCX_CLAIM_PROGRAM_CODE_VALUESET.slug]] = []
+    program_code: list[dict] = []
     serviced_period: PeriodSpec | None = None
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
@@ -248,7 +244,7 @@ class ClaimItemSpec(BaseModel):
 
 class ClaimAccidentSpec(BaseModel):
     date: datetime
-    type: ValueSetBoundCoding[NHCX_CLAIM_ACCIDENT_TYPE_VALUESET.slug] | None = None
+    type: dict | None = None
     location: str | None = None
 
 
@@ -260,7 +256,10 @@ class ClaimPayeeSpec(BaseModel):
 class ClaimBaseSpec(EMRResource):
     __model__ = Claim
     __exclude__ = ["patient", "provider", "encounter"]
+    __store_metadata__ = True
+
     id: UUID4 | None = None
+    claim_flow_id: str | None = None
 
     created_date: datetime | None = None
     modified_date: datetime | None = None
@@ -325,6 +324,21 @@ class ClaimCreateSpec(ClaimBaseSpec):
             obj.insurer = insurer.model_dump(mode="json")
         except NHCXAPIException as e:
             raise ValidationError(e.detail) from e
+
+        flow_id = str(uuid4())
+        if self.related:
+            first_related = self.related[0]
+            related_claim = Claim.objects.filter(
+                external_id=first_related.claim
+            ).first()
+            if related_claim:
+                related_flow_id = (related_claim.meta or {}).get("claim_flow_id")
+                if related_flow_id:
+                    flow_id = related_flow_id
+
+        obj.meta = obj.meta or {}
+        if not obj.meta.get("claim_flow_id"):
+            obj.meta["claim_flow_id"] = flow_id
 
 
 class ClaimResponseRetrieveSpec(EMRResource):

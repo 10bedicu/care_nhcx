@@ -77,6 +77,10 @@ class ClaimViewSet(
         claim = self.get_object()
 
         fhir_data = Fhir().create_claim_bundle(claim)
+
+        with open("claim_submit.json", "w") as f:
+            f.write(fhir_data.json())
+
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(

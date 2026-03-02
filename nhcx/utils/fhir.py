@@ -577,7 +577,13 @@ class Fhir:
             insurer=self._reference(
                 self._participant_to_organization(Participant(**request.insurer))
             ),
-            facility=self._reference(self._location(request.provider.facility)),
+            facility=self._reference(
+                self._location(
+                    self._override_facility_external_id(
+                        request.provider.facility, uuid4()
+                    )
+                )
+            ),
             supportingInfo=[
                 CoverageEligibilityRequestSupportingInfo(
                     sequence=supporting_info.get("sequence"),
@@ -649,6 +655,15 @@ class Fhir:
                 for item in request.item
             ],
         )
+
+    def _override_facility_external_id(
+        self, facility: FacilityModel, new_external_id
+    ) -> FacilityModel:
+        from copy import copy
+
+        cloned = copy(facility)
+        cloned.external_id = new_external_id
+        return cloned
 
     def _claim(self, claim: ClaimModel):
         id = str(claim.external_id)

@@ -84,6 +84,10 @@ class CommunicationViewSet(
         communication.save()
 
         fhir_data = Fhir().create_task_bundle(task)
+
+        with open("communication_send.json", "w") as f:
+            f.write(fhir_data.json())
+
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(

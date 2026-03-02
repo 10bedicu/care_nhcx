@@ -23,13 +23,17 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     pydantic_retrieve_model = InsurancePlanRetrieveSpec
 
     def get_object(self):
-        task = get_object_or_404(
-            Task,
-            identifier=self.kwargs[self.lookup_field],
-            use_case=TaskUseCaseChoices.INSURANCE_PLAN_REQUEST,
-            focus_type__isnull=False,
-            focus_id__isnull=False,
-        )
+        try:
+            task = Task.objects.filter(
+                identifier=self.kwargs[self.lookup_field],
+                use_case=TaskUseCaseChoices.INSURANCE_PLAN_REQUEST,
+                focus_type__isnull=False,
+                focus_id__isnull=False,
+            ).latest("created_date")
+        except Task.DoesNotExist as err:
+            from django.http import Http404
+
+            raise Http404("No Task matches the given query.") from err
         return task.focus
 
     @extend_schema(
@@ -87,6 +91,10 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         )
 
         fhir_data = Fhir().create_task_bundle(task)
+
+        with open("insurance_plan_request.json", "w") as f:
+            f.write(fhir_data.json())
+
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
