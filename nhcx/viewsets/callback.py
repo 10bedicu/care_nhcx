@@ -1,12 +1,11 @@
-import json
 
+# from care.utils.notification_handler import send_webpush
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet
-from care.utils.notification_handler import send_webpush
 from nhcx.specs.nhcx_response import (
     EntityTypeChoices,
     NHCXResponse,
@@ -43,15 +42,15 @@ class CallbackViewSet(EMRBaseViewSet):
                 )
             )
 
-            message = {
-                "type": "MESSAGE",
-                "from": "coverageelegibility/on_check",
-                "message": "success" if not eligibility_response.error else "failed",
-            }
-            send_webpush(
-                username=eligibility_request.created_by.username,
-                message=json.dumps(message),
-            )
+            # message = {
+            #     "type": "MESSAGE",
+            #     "from": "coverageelegibility/on_check",
+            #     "message": "success" if not eligibility_response.error else "failed",
+            # }
+            # send_webpush(
+            #     username=eligibility_request.created_by.username,
+            #     message=json.dumps(message),
+            # )
 
             nhcx_response = NHCXResponse.create_success_response(
                 api_call_id=headers.get("x-hcx-api_call_id"),
@@ -95,15 +94,15 @@ class CallbackViewSet(EMRBaseViewSet):
                 headers,
             )
 
-            message = {
-                "type": "MESSAGE",
-                "from": "predetermination/on_submit",
-                "message": "success" if not claim_response.error else "failed",
-            }
-            send_webpush(
-                username=claim_request.created_by.username,
-                message=json.dumps(message),
-            )
+            # message = {
+            #     "type": "MESSAGE",
+            #     "from": "predetermination/on_submit",
+            #     "message": "success" if not claim_response.error else "failed",
+            # }
+            # send_webpush(
+            #     username=claim_request.created_by.username,
+            #     message=json.dumps(message),
+            # )
 
             nhcx_response = NHCXResponse.create_success_response(
                 api_call_id=headers.get("x-hcx-api_call_id"),
@@ -147,15 +146,15 @@ class CallbackViewSet(EMRBaseViewSet):
                 headers,
             )
 
-            message = {
-                "type": "MESSAGE",
-                "from": "preauth/on_submit",
-                "message": "success" if not claim_response.error else "failed",
-            }
-            send_webpush(
-                username=claim_request.created_by.username,
-                message=json.dumps(message),
-            )
+            # message = {
+            #     "type": "MESSAGE",
+            #     "from": "preauth/on_submit",
+            #     "message": "success" if not claim_response.error else "failed",
+            # }
+            # send_webpush(
+            #     username=claim_request.created_by.username,
+            #     message=json.dumps(message),
+            # )
 
             nhcx_response = NHCXResponse.create_success_response(
                 api_call_id=headers.get("x-hcx-api_call_id"),
@@ -199,15 +198,15 @@ class CallbackViewSet(EMRBaseViewSet):
                 headers,
             )
 
-            message = {
-                "type": "MESSAGE",
-                "from": "claim/on_submit",
-                "message": "success" if not claim_response.error else "failed",
-            }
-            send_webpush(
-                username=claim_request.created_by.username,
-                message=json.dumps(message),
-            )
+            # message = {
+            #     "type": "MESSAGE",
+            #     "from": "claim/on_submit",
+            #     "message": "success" if not claim_response.error else "failed",
+            # }
+            # send_webpush(
+            #     username=claim_request.created_by.username,
+            #     message=json.dumps(message),
+            # )
 
             nhcx_response = NHCXResponse.create_success_response(
                 api_call_id=headers.get("x-hcx-api_call_id"),
