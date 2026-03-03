@@ -1,8 +1,8 @@
 from typing import Any
 
+from abdm.service.request import Request
 from rest_framework import status
 
-from care_abdm.abdm.service.request import Request
 from nhcx.services.types.participant import (
     CreateParticipantBody,
     CreateParticipantResponse,
