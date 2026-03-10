@@ -4,7 +4,7 @@ from functools import wraps
 from uuid import uuid4
 
 from django.db import models, transaction
-from django.db.models import Value
+from django.db.models import Q, Value
 from django.db.models.functions import Replace
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.attachment import Attachment
@@ -465,7 +465,12 @@ class Fhir:
                         )
                     )
                     .filter(
-                        abha_number_parsed=coverage.policy.abhanumber.replace("-", "")
+                        Q(
+                            abha_number_parsed=coverage.policy.abhanumber.replace(
+                                "-", ""
+                            )
+                        )
+                        | Q(abha_number__mobile=coverage.policy.mobilenumber)
                     )
                     .first()
                 )
