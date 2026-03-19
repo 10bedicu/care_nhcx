@@ -3,6 +3,12 @@ from typing import Any
 from abdm.service.request import Request
 from rest_framework import status
 
+from nhcx.services.types.gateway import (
+    AbhaBiometricAuthInitBody,
+    AbhaBiometricAuthInitResponse,
+    AbhaBiometricAuthVerifyBody,
+    AbhaBiometricAuthVerifyResponse,
+)
 from nhcx.utils.exceptions import NHCXAPIException
 
 
@@ -145,3 +151,98 @@ class GatewayService:
             raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
 
         return response.json()
+
+    @staticmethod
+    def abha__biometric__auth__init(
+        body: AbhaBiometricAuthInitBody,
+    ) -> AbhaBiometricAuthInitResponse:
+        path = "/abha/biometric/auth/init"
+
+        scope_map = {
+            "FINGERPRINT": "bio",
+            "IRIS": "iris",
+            "FACE_AUTH": "face",
+        }
+        payload = {
+            "scope": [
+                "abha-login",
+                f"aadhaar-{scope_map.get(body.authMode, 'bio')}-verify",
+            ],
+            "loginHint": "abha-number",
+            "loginId": body.abhaNumber,
+            "otpSystem": "aadhaar",
+            "authMode": body.authMode,
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": GatewayService.request.auth_header().get("Authorization"),
+            "process": body.process,
+            "payerid": body.payerId,
+        }
+
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers=headers,
+        )
+
+        if response.status_code != status.HTTP_200_OK:
+            raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
+
+        response_data = response.json()
+        return AbhaBiometricAuthInitResponse(**response_data)
+
+    @staticmethod
+    def abha__biometric__auth__verify(
+        body: AbhaBiometricAuthVerifyBody,
+    ) -> AbhaBiometricAuthVerifyResponse:
+        path = "/abha/biometric/auth/verify"
+
+        scope_map = {
+            "FINGERPRINT": "bio",
+            "IRIS": "iris",
+            "FACE_AUTH": "face",
+        }
+        auth_method_map = {
+            "FINGERPRINT": "fingerPrintAuthPid",
+            "IRIS": "irisAuthPid",
+            "FACE_AUTH": "faceAuthPid",
+        }
+        payload = {
+            "scope": [
+                "abha-login",
+                f"aadhaar-{scope_map.get(body.authMode, 'bio')}-verify",
+            ],
+            "authData": {
+                "authMethods": [scope_map.get(body.authMode, "bio")],
+                scope_map.get(body.authMode, "bio"): {
+                    "txnId": body.txnId,
+                    auth_method_map.get(
+                        body.authMode, "fingerPrintAuthPid"
+                    ): body.authData,
+                },
+            },
+            "authMode": body.authMode,
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": GatewayService.request.auth_header().get("Authorization"),
+            "process": body.process,
+            "payerid": body.payerId,
+        }
+
+        response = GatewayService.request.post(
+            path,
+            payload,
+            headers=headers,
+        )
+
+        if response.status_code != status.HTTP_200_OK:
+            raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
+
+        response_data = response.json()
+        return AbhaBiometricAuthVerifyResponse(**response_data)
