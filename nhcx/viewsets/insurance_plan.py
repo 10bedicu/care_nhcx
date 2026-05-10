@@ -11,6 +11,7 @@ from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
 from nhcx.models.provider import Provider
 from nhcx.models.task import Task, TaskUseCaseChoices
 from nhcx.services.gateway import GatewayService
+from nhcx.settings import plugin_settings as settings
 from nhcx.specs.insurance_plan import (
     InsurancePlanRequestBody,
     InsurancePlanRetrieveSpec,
@@ -36,11 +37,11 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             raise Http404("No Task matches the given query.") from err
         return task.focus
 
+    @action(detail=False, methods=["POST"])
     @extend_schema(
         request=InsurancePlanRequestBody,
         responses={200: None},
     )
-    @action(detail=False, methods=["POST"])
     def request(self, request, *args, **kwargs):
         data = InsurancePlanRequestBody(**request.data)
         provider = get_object_or_404(Provider, facility__external_id=data.facility)
@@ -71,7 +72,9 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                             }
                         ]
                     },
-                    "valueString": "100217",  # TODO: REPLACE_AFTER_TESTING: replace this with data.policy.sno after testing
+                    "valueString": data.policy.productname
+                    if settings.PAYER == "PMJAY"
+                    else "100217",  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 },
                 {
                     "type": {
@@ -83,7 +86,9 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                             }
                         ]
                     },
-                    "valueString": "32722",  # TODO: REPLACE_AFTER_TESTING: replace this with data.provider_id after testing
+                    "valueString": provider.facility.healthfacility.hf_id
+                    if settings.PAYER == "PMJAY"
+                    else "32722",  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 },
             ],
             output=[],
@@ -97,15 +102,25 @@ class InsurancePlanViewSet(EMRRetrieveMixin, EMRBaseViewSet):
 
         fhir_payload = json.loads(fhir_data.json())
 
+        print("_--------------------------------_")
+        print(fhir_payload)
+        print("_--------------------------------_")
+
         encrypted_payload = NHCX.encrypt(
             data=fhir_payload,
             sender_code=provider.participant_code,
-            recipient_code="1000003538@hcx",  # TODO: REPLACE_AFTER_TESTING: replace this with data.policy.payerid after testing
+            recipient_code=data.policy.payerid
+            if settings.PAYER == "PMJAY"
+            else "1000003538@hcx",  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
             patient_abha_number=data.policy.abhanumber,
             correlation_id=str(task.external_id),
             status="request.initiated",
             workflow_id="",
         )
+
+        print("_--------------------------------_")
+        print(encrypted_payload)
+        print("_--------------------------------_")
 
         _response = GatewayService.insurance_plan__request(encrypted_payload)
 

@@ -1,11 +1,15 @@
+import base64
 from typing import Any
 
 from abdm.service.request import Request
 from rest_framework import status
 
+from nhcx.models.member_biometric_auth import MemberBiometricAuth
 from nhcx.services.types.gateway import (
     AbhaBiometricAuthInitBody,
     AbhaBiometricAuthInitResponse,
+    AbhaBiometricAuthRefreshBody,
+    AbhaBiometricAuthRefreshResponse,
     AbhaBiometricAuthVerifyBody,
     AbhaBiometricAuthVerifyResponse,
 )
@@ -53,7 +57,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -68,7 +72,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -83,7 +87,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -98,7 +102,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -113,7 +117,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -128,7 +132,22 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
+            headers=GatewayService.headers(),
+        )
+
+        if response.status_code != status.HTTP_202_ACCEPTED:
+            raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
+
+        return response.json()
+
+    @staticmethod
+    def task__submit(payload: str) -> dict:
+        path = "/v1/task/submit"
+
+        response = GatewayService.request.post(
+            path,
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -143,7 +162,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"type": "JWEPayload", "payload": payload},
+            {"payload": payload},
             headers=GatewayService.headers(),
         )
 
@@ -221,7 +240,7 @@ class GatewayService:
                     "txnId": body.txnId,
                     auth_method_map.get(
                         body.authMode, "fingerPrintAuthPid"
-                    ): body.authData,
+                    ): base64.b64encode(body.authData.encode("utf-8")).decode("utf-8"),
                 },
             },
             "authMode": body.authMode,
@@ -246,3 +265,48 @@ class GatewayService:
 
         response_data = response.json()
         return AbhaBiometricAuthVerifyResponse(**response_data)
+
+    @staticmethod
+    def abha__biometric__auth__refresh_member_token(
+        member_biometric_auth: MemberBiometricAuth,
+    ) -> MemberBiometricAuth:
+        refresh_response = GatewayService.abha__biometric__auth__refresh(
+            AbhaBiometricAuthRefreshBody(
+                process=member_biometric_auth.process,
+                payerId=member_biometric_auth.payer_id,
+                refreshToken=member_biometric_auth.refresh_token,
+            )
+        )
+
+        member_biometric_auth.token = refresh_response.token
+        member_biometric_auth.expires_in = refresh_response.expiresIn
+        member_biometric_auth.refresh_token = refresh_response.refreshToken
+        member_biometric_auth.refresh_expires_in = refresh_response.refreshExpiresIn
+        member_biometric_auth.save()
+        return member_biometric_auth
+
+    @staticmethod
+    def abha__biometric__auth__refresh(
+        body: AbhaBiometricAuthRefreshBody,
+    ) -> AbhaBiometricAuthRefreshResponse:
+        path = "/abha/biometric/auth/refresh/token"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": GatewayService.request.auth_header().get("Authorization"),
+            "process": body.process,
+            "payerid": body.payerId,
+            "refreshToken": body.refreshToken,
+        }
+
+        response = GatewayService.request.get(
+            path,
+            headers=headers,
+        )
+
+        if response.status_code != status.HTTP_200_OK:
+            raise NHCXAPIException(detail=GatewayService.handle_error(response.json()))
+
+        response_data = response.json()
+        return AbhaBiometricAuthRefreshResponse(**response_data)

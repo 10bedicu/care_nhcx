@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import UUID4, BaseModel
 
 
 class AbhaBiometricAuthInitBody(BaseModel):
@@ -46,3 +46,23 @@ class AbhaBiometricAuthVerifyResponse(BaseModel):
     expiresIn: int
     refreshExpiresIn: int
     accounts: list[Account]
+
+class AbhaBiometricAuthInitApiBody(AbhaBiometricAuthInitBody):
+    pass
+
+
+class AbhaBiometricAuthVerifyApiBody(AbhaBiometricAuthVerifyBody):
+    encounter: UUID4
+
+
+class AbhaBiometricAuthRefreshBody(BaseModel):
+    process: Literal["Preauth", "Discharge"] = "Preauth"
+    payerId: str
+    refreshToken: str
+
+
+class AbhaBiometricAuthRefreshResponse(BaseModel):
+    token: str
+    expiresIn: int
+    refreshToken: str
+    refreshExpiresIn: int

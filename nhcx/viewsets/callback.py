@@ -323,14 +323,46 @@ class CallbackViewSet(EMRBaseViewSet):
     @action(detail=False, methods=["POST"], url_path="insuranceplan/on_request")
     def insurance_plan__on_request(self, request, *args, **kwargs):
         data = request.data
+        type = data.get("type")
         payload = data.get("payload")
+
+        if type == "ProtocolResponse":
+            print("_--------------------------------_")
+            print(data)
+            print("_--------------------------------_")
+            return Response(
+                {},
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        if not payload:
+            print("_--------------------------------_")
+            print(data, request.headers, request)
+            print("_--------------------------------_")
+            return Response(
+                {},
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        print("_--------------------------------_")
+        print(data, payload)
+        print("_--------------------------------_")
+
         headers = NHCX.headers(payload)
+
+        print("_--------------------------------_")
+        print(headers)
+        print("_--------------------------------_")
 
         try:
             decrypted_data = NHCX.decrypt(
                 recipient_code=headers.get("x-hcx-recipient_code"),
                 data=payload,
             )
+
+            print("_--------------------------------_")
+            print(decrypted_data)
+            print("_--------------------------------_")
 
             (task, insurance_plan) = Fhir().process_insurance_plan_response(
                 decrypted_data,
@@ -343,6 +375,48 @@ class CallbackViewSet(EMRBaseViewSet):
                 sender_code=headers.get("x-hcx-sender_code"),
                 recipient_code=headers.get("x-hcx-recipient_code"),
                 entity_type=EntityTypeChoices.PAYMENT,
+                protocol_status=ProtocolStatusChoices.REQUEST_QUEUED,
+            )
+            return Response(nhcx_response.model_dump(), status=status.HTTP_202_ACCEPTED)
+
+        except Exception as e:
+            nhcx_response = NHCXResponse.create_error_response(
+                api_call_id=headers.get("x-hcx-api_call_id"),
+                correlation_id=headers.get("x-hcx-correlation_id"),
+                error_code="400",
+                error_message=f"Decryption failed: {e!s}",
+            )
+            return Response(
+                nhcx_response.model_dump(), status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @extend_schema(
+        request=None,
+        responses={202: None},
+    )
+    @action(detail=False, methods=["POST"], url_path="task/on_submit")
+    def task__on_submit(self, request, *args, **kwargs):
+        data = request.data
+        payload = data.get("payload")
+        headers = NHCX.headers(payload)
+
+        try:
+            decrypted_data = NHCX.decrypt(
+                recipient_code=headers.get("x-hcx-recipient_code"),
+                data=payload,
+            )
+
+            (task, claim_response, claim) = Fhir().process_task_response(
+                decrypted_data,
+                headers,
+            )
+
+            nhcx_response = NHCXResponse.create_success_response(
+                api_call_id=headers.get("x-hcx-api_call_id"),
+                correlation_id=headers.get("x-hcx-correlation_id"),
+                sender_code=headers.get("x-hcx-sender_code"),
+                recipient_code=headers.get("x-hcx-recipient_code"),
+                entity_type=EntityTypeChoices.TASK,
                 protocol_status=ProtocolStatusChoices.REQUEST_QUEUED,
             )
             return Response(nhcx_response.model_dump(), status=status.HTTP_202_ACCEPTED)

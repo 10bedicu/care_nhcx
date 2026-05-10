@@ -83,3 +83,6 @@ venv.bak/
 
 # Mac
 .DS_Store
+
+# Repo specific
+logs/*

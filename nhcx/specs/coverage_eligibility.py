@@ -27,7 +27,6 @@ from nhcx.services.types.participant import Policy, SearchParticipantBody
 from nhcx.specs.valuesets.coverage_eligibility import (
     NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET,
     NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_DIAGNOSIS_CODE_VALUESET,
-    NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
 
@@ -122,10 +121,10 @@ class CoverageEligibilityRequestItemSpec(BaseModel):
         NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET.slug
     ]
     product_or_service: (
-        ValueSetBoundCoding[
-            NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.slug
-        ]
-        | None
+        # ValueSetBoundCoding[
+        #     NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.slug
+        # ]
+        dict | None
     ) = None
     charge_item: UUID4 | None = None
     quantity: Quantity | None = None
@@ -217,7 +216,7 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1000003538@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
+                    participant_code="1518@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")

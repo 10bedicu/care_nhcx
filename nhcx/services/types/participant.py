@@ -42,7 +42,7 @@ class Participant(BaseModel):
     signing_cert_path: str | None
     encryption_cert: str
     endpoint_url: str
-    registry_id: str
+    registry_id: str | None
     state: str
     district: str | None
     authentication_applicable: Literal["Y", "N"]

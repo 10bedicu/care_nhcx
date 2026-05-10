@@ -101,6 +101,7 @@ REQUIRED_SETTINGS = {"BACKEND_DOMAIN"}
 
 DEFAULTS = {
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
+    "PAYER": "PMJAY",  # DUMMY | PMJAY
 }
 
 plugin_settings = PluginSettings(

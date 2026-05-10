@@ -68,6 +68,7 @@ from care.emr.models.patient import Patient as PatientModel
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
+from care_nhcx.nhcx.specs.claim import ClaimStatusChoices
 from nhcx.models.claim import Claim as ClaimModel
 from nhcx.models.claim import ClaimResponse as ClaimResponseModel
 from nhcx.models.communication import Communication as CommunicationModel
@@ -471,6 +472,7 @@ class Fhir:
                             )
                         )
                         | Q(abha_number__mobile=coverage.policy.mobilenumber)
+                        | Q(external_id="fb9e7a10-36e0-4dcf-9584-1e9c8550a78d")
                     )
                     .first()
                 )
@@ -1331,3 +1333,83 @@ class Fhir:
         task.save()
 
         return (task, insurance_plan_instance)
+
+    def process_task_response(self, response: dict, headers: dict):
+        # FIXME: make this dynamic to handle cancel and reprocess responses
+
+        # Using construct to avoid fhir validation errors
+        task_response_bundle = Bundle.construct(**response)
+
+        task_request = TaskModel.objects.filter(
+            external_id=headers.get("x-hcx-correlation_id")
+        ).first()
+        if not task_request:
+            raise Exception("Correlation ID not found")
+
+        task = Task.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "Task",
+                    task_response_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        claim_response = ClaimResponse.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "ClaimResponse",
+                    task_response_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        claim_instance = task_request.claim
+
+        with transaction.atomic():
+            # TODO: use TaskSpec to create the instance
+            task_instance = TaskModel.objects.create(
+                identifier=task.id,
+                status=task.status,
+                intent=task.intent,
+                priority=task.priority,
+                code=task.code,
+                authored_on=task.authoredOn,
+                description=task.description,
+                reason_code=task.reasonCode,
+                input=task.input,
+                output=task.output,
+                claim=claim_instance,
+                use_case=TaskUseCaseChoices.CANCEL_RESPONSE,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            # TODO: use ClaimResponseSpec to create the instance
+            claim_response_instance = ClaimResponseModel.objects.create(
+                request=claim_instance,
+                outcome=claim_response.outcome,
+                error=claim_response.error,
+                disposition=claim_response.disposition,
+                item=claim_response.item,
+                add_item=claim_response.addItem,
+                total=claim_response.total,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            task_instance.part_of = task_request
+            task_instance.focus = claim_response_instance
+            task_instance.save()
+
+            if task_instance.code.get("coding")[0].get("code") == "approve":
+                claim_instance.status = ClaimStatusChoices.CANCELLED
+                claim_instance.save()
+
+        return (task_instance, claim_response_instance, claim_instance)
