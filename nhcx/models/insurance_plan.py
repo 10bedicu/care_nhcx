@@ -643,6 +643,14 @@ class InsurancePlanQuestionnaire(EMRBaseModel):
     purpose = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     items = models.JSONField(default=list, null=True, blank=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["insurance_plan", "fhir_id"],
+                name="uniq_ip_questionnaire_fhir_id",
+            ),
+        ]
+
 
 class InsurancePlanBenefit(EMRBaseModel):
     """Denormalized per-plan benefit row that fuses CoverageBenefit (catalog)

@@ -176,10 +176,8 @@ class _ExtensionParser:
             elif url == CLAIM_EXCLUSION_URL:
                 yield ClaimExclusion, self._build_claim_exclusion(ext, common)
             elif url == CLAIM_SUPPORTING_INFO_URL:
-                yield (
-                    ClaimSupportingInfoRequirement,
-                    self._build_supporting_info(ext, common),
-                )
+                for sisr in self._build_supporting_infos(ext, common):
+                    yield ClaimSupportingInfoRequirement, sisr
 
     def _ct_for(self, parent_cls):
         if parent_cls not in self._ct_cache:
@@ -242,6 +240,30 @@ class _ExtensionParser:
             items=items,
             items_codes=items_codes,
         )
+
+    def _build_supporting_infos(self, ext, common):
+        """Yield one SISR per requirement encoded under ``ext``.
+
+        PMJAY mixes two shapes: a flat one whose children are
+        ``category`` / ``code`` / ``documentationUrl``, and a wrapper whose
+        children's URLs start with ``CLAIM_SUPPORTING_INFO_URL`` (qualified
+        with benefit / questionnaire / mandate ids) and themselves carry
+        the flat shape. Empty SISRs (no category, code, or url) are dropped
+        to avoid surfacing wrapper-only or malformed rows in the API.
+        """
+        children = ext.get("extension") or []
+        is_wrapper = bool(children) and all(
+            (c.get("url") or "").startswith(CLAIM_SUPPORTING_INFO_URL)
+            for c in children
+        )
+        if is_wrapper:
+            for child in children:
+                yield from self._build_supporting_infos(child, common)
+            return
+
+        sisr = self._build_supporting_info(ext, common)
+        if sisr.category_code or sisr.code_code or sisr.documentation_url:
+            yield sisr
 
     def _build_supporting_info(self, ext, common):
         category = None
@@ -830,15 +852,23 @@ class InsurancePlanIngestor:
         # `full_url` is captured here because it is the join key against
         # ClaimSupportingInfoRequirement.documentation_url; the resource's
         # canonical `url` may differ or be absent in NDHM bundles.
+        # PMJAY bundles repeat the same Questionnaire resource once per
+        # linking SISR. Dedup by fhir_id; keep the first occurrence.
         rows = []
+        seen_fhir_ids = set()
         for entry in self.entries:
             res = entry.get("resource") or {}
             if res.get("resourceType") != "Questionnaire":
                 continue
+            fhir_id = res.get("id") or ""
+            if fhir_id and fhir_id in seen_fhir_ids:
+                continue
+            if fhir_id:
+                seen_fhir_ids.add(fhir_id)
             rows.append(
                 InsurancePlanQuestionnaire(
                     insurance_plan=insurance_plan,
-                    fhir_id=res.get("id") or "",
+                    fhir_id=fhir_id,
                     full_url=entry.get("fullUrl") or "",
                     url=res.get("url") or "",
                     title=res.get("title") or "",
