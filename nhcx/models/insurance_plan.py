@@ -59,6 +59,27 @@ def _flatten_code(codeable_concept):
     return coding[0].get("code") or ""
 
 
+def _flatten_display(codeable_concept):
+    """Return a human-readable label for a FHIR CodeableConcept. Prefers
+    `text`, then first coding[].display, then first coding[].code, else ''."""
+    if not codeable_concept:
+        return ""
+    if isinstance(codeable_concept, list):
+        codeable_concept = codeable_concept[0] if codeable_concept else None
+        if not codeable_concept:
+            return ""
+    if not isinstance(codeable_concept, dict):
+        return ""
+    text = codeable_concept.get("text")
+    if text:
+        return text
+    coding = codeable_concept.get("coding") or []
+    if not coding:
+        return ""
+    first = coding[0] or {}
+    return first.get("display") or first.get("code") or ""
+
+
 class InsurancePlan(EMRBaseModel):
     """FHIR R4 InsurancePlan resource root (NDHM profile)."""
 
@@ -141,6 +162,7 @@ class InsurancePlanCoverage(EMRBaseModel):
     fhir_element_id = models.CharField(max_length=64, null=True, blank=True)
     type = models.JSONField(default=dict, null=False, blank=False)
     type_code = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    type_display = models.CharField(max_length=255, blank=True, default="")
 
     claim_exclusions = GenericRelation(
         "ClaimExclusion",
@@ -161,6 +183,7 @@ class InsurancePlanCoverage(EMRBaseModel):
     def save(self, *args, **kwargs):
         if self.type:
             self.type_code = _flatten_code(self.type)
+            self.type_display = _flatten_display(self.type)
         super().save(*args, **kwargs)
 
 
@@ -177,6 +200,9 @@ class InsurancePlanCoverageBenefit(EMRBaseModel):
     fhir_element_id = models.CharField(max_length=64, null=True, blank=True)
     type = models.JSONField(default=dict, null=False, blank=False)
     type_code = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    type_display = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     requirement = models.TextField(null=True, blank=True)
 
     claim_exclusions = GenericRelation(
@@ -198,6 +224,7 @@ class InsurancePlanCoverageBenefit(EMRBaseModel):
     def save(self, *args, **kwargs):
         if self.type:
             self.type_code = _flatten_code(self.type)
+            self.type_display = _flatten_display(self.type)
         super().save(*args, **kwargs)
 
 
@@ -313,6 +340,9 @@ class InsurancePlanPlanSpecificCostBenefit(EMRBaseModel):
     fhir_element_id = models.CharField(max_length=64, null=True, blank=True)
     type = models.JSONField(default=dict, null=False, blank=False)
     type_code = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    type_display = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
 
     claim_exclusions = GenericRelation(
         "ClaimExclusion",
@@ -333,6 +363,7 @@ class InsurancePlanPlanSpecificCostBenefit(EMRBaseModel):
     def save(self, *args, **kwargs):
         if self.type:
             self.type_code = _flatten_code(self.type)
+            self.type_display = _flatten_display(self.type)
         super().save(*args, **kwargs)
 
 
@@ -597,6 +628,10 @@ class InsurancePlanQuestionnaire(EMRBaseModel):
         related_name="questionnaires",
     )
     fhir_id = models.CharField(max_length=64, null=True, blank=True)
+    # `full_url` is the bundle entry's fullUrl (typically `urn:uuid:...` in
+    # NDHM/PMJAY) — distinct from `url` (canonical). It's the join key against
+    # ClaimSupportingInfoRequirement.documentation_url.
+    full_url = models.CharField(max_length=512, null=True, blank=True, db_index=True)
     url = models.CharField(max_length=512, null=True, blank=True)
     title = models.CharField(max_length=512, null=False, blank=False)
     status = models.CharField(
@@ -607,3 +642,111 @@ class InsurancePlanQuestionnaire(EMRBaseModel):
     subject_type = models.JSONField(default=list, null=True, blank=True)
     purpose = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     items = models.JSONField(default=list, null=True, blank=True)
+
+
+class InsurancePlanBenefit(EMRBaseModel):
+    """Denormalized per-plan benefit row that fuses CoverageBenefit (catalog)
+    with PlanSpecificCostBenefit (pricing) for a single (insurance_plan, plan,
+    coverage_type_code, type_code) tuple. Materialised by the ingestor so
+    list/search/filter endpoints can hit a single indexed table.
+
+    Source rows remain accessible via `coverage`, `specific_cost_benefit`, and
+    the FHIR id list on `coverage_benefit_fhir_ids` for detail views and
+    extension rollups.
+    """
+
+    insurance_plan = models.ForeignKey(
+        InsurancePlan,
+        on_delete=models.CASCADE,
+        null=False,
+        blank=False,
+        related_name="benefits",
+    )
+    plan = models.ForeignKey(
+        InsurancePlanPlan,
+        on_delete=models.CASCADE,
+        null=False,
+        blank=False,
+        related_name="benefits",
+    )
+    coverage = models.ForeignKey(
+        InsurancePlanCoverage,
+        on_delete=models.CASCADE,
+        null=False,
+        blank=False,
+        related_name="fused_benefits",
+    )
+
+    coverage_type_code = models.CharField(max_length=64, db_index=True)
+    coverage_type_display = models.CharField(max_length=255, blank=True, default="")
+    type_code = models.CharField(max_length=64, db_index=True)
+    type_display = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
+    plan_type_code = models.CharField(
+        max_length=64, null=True, blank=True, db_index=True
+    )
+    plan_type_display = models.CharField(max_length=255, blank=True, default="")
+    specialty_category_code = models.CharField(
+        max_length=64, null=True, blank=True, db_index=True
+    )
+    specialty_category_display = models.CharField(max_length=255, blank=True, default="")
+
+    # Nullable: a catalog-only row may have no priced SCB under this plan tier.
+    specific_cost_benefit = models.ForeignKey(
+        InsurancePlanPlanSpecificCostBenefit,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fused_rows",
+    )
+    coverage_benefit_fhir_ids = models.JSONField(default=list, blank=True)
+
+    min_cost = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, db_index=True
+    )
+    max_cost = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, db_index=True
+    )
+    max_limit_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, db_index=True
+    )
+    cost_count = models.PositiveSmallIntegerField(default=0)
+    qualifier_count = models.PositiveSmallIntegerField(default=0)
+
+    # Merge rule for the next block: SpecificCostBenefit wins on non-null,
+    # then CoverageBenefit, else default.
+    authorization_required = models.BooleanField(default=True, db_index=True)
+    is_day_care = models.BooleanField(null=True, blank=True, db_index=True)
+    implant_applicable = models.BooleanField(null=True, blank=True, db_index=True)
+    stratification_allowed = models.BooleanField(null=True, blank=True, db_index=True)
+    procedure_type = models.CharField(
+        max_length=64, null=True, blank=True, db_index=True
+    )
+    has_copayment = models.BooleanField(default=False, db_index=True)
+    has_deductible = models.BooleanField(default=False, db_index=True)
+    has_waiting_period = models.BooleanField(default=False, db_index=True)
+
+    has_stratification_qualifier = models.BooleanField(default=False, db_index=True)
+    has_implant_qualifier = models.BooleanField(default=False, db_index=True)
+    has_consumable_qualifier = models.BooleanField(default=False, db_index=True)
+
+    has_questionnaire = models.BooleanField(default=False, db_index=True)
+    questionnaire_fhir_ids = models.JSONField(default=list, blank=True)
+    requires_supporting_info = models.BooleanField(default=False, db_index=True)
+    supporting_info_count = models.PositiveSmallIntegerField(default=0)
+    condition_count = models.PositiveSmallIntegerField(default=0)
+    exclusion_count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["insurance_plan", "plan", "coverage_type_code", "type_code"],
+                name="uniq_ipb_per_plan",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["insurance_plan", "plan", "type_display"]),
+            models.Index(fields=["insurance_plan", "plan_type_code"]),
+            models.Index(fields=["insurance_plan", "coverage_type_code", "type_code"]),
+        ]

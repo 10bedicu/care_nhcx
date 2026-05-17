@@ -5,8 +5,15 @@ defined in ``nhcx.models.insurance_plan``.
 A single PMJAY payload expands to ~25-30k rows (see scaling notes in models).
 Every level is materialised via ``bulk_create`` inside one transaction so the
 end-to-end ingestion stays within a few seconds.
+
+After the raw FHIR tree is persisted, a final fusion pass materialises
+``InsurancePlanBenefit`` rows — one per (insurance_plan, plan,
+coverage_type_code, type_code) — that pre-merge CoverageBenefit (catalog) with
+SpecificCostBenefit (pricing) so list/search/filter endpoints can hit a single
+indexed table without rolling up on every request.
 """
 
+from collections import defaultdict
 from datetime import datetime
 
 from django.contrib.contenttypes.models import ContentType
@@ -19,6 +26,7 @@ from nhcx.models.insurance_plan import (
     ClaimSupportingInfoRequirement,
     CostQualifierType,
     InsurancePlan,
+    InsurancePlanBenefit,
     InsurancePlanCoverage,
     InsurancePlanCoverageBenefit,
     InsurancePlanCoverageBenefitLimit,
@@ -30,6 +38,7 @@ from nhcx.models.insurance_plan import (
     InsurancePlanPlanSpecificCostBenefitCostQualifier,
     InsurancePlanQuestionnaire,
     _flatten_code,
+    _flatten_display,
 )
 from nhcx.models.task import Task
 
@@ -62,6 +71,16 @@ _QUALIFIER_SYSTEM_TO_TYPE = (
     ("implant", CostQualifierType.IMPLANT),
     ("investigation", CostQualifierType.INVESTIGATION),
     ("medicine", CostQualifierType.MEDICINE),
+)
+
+# Code-prefix fallback when the qualifier system URI is generic (e.g. PMJAY
+# bundles use `…/ValueSet/ndhm-productorservice` for every qualifier and
+# disambiguate via the code prefix).
+_QUALIFIER_CODE_PREFIX_TO_TYPE = (
+    ("STRAT", CostQualifierType.STRATIFICATION),
+    ("IMP", CostQualifierType.IMPLANT),
+    ("INV", CostQualifierType.INVESTIGATION),
+    ("MED", CostQualifierType.MEDICINE),
 )
 
 
@@ -102,6 +121,10 @@ def _qualifier_type_for(qualifier_concept):
     system = (coding.get("system") or "").lower()
     for fragment, qualifier_type in _QUALIFIER_SYSTEM_TO_TYPE:
         if fragment in system:
+            return qualifier_type
+    code = (coding.get("code") or "").upper()
+    for prefix, qualifier_type in _QUALIFIER_CODE_PREFIX_TO_TYPE:
+        if code.startswith(prefix):
             return qualifier_type
     return CostQualifierType.OTHER
 
@@ -231,10 +254,14 @@ class _ExtensionParser:
             elif key in _SUPPORTING_INFO_CODE_KEYS:
                 code = sub.get("valueCodeableConcept") or code
             elif key in _SUPPORTING_INFO_DOC_URL_KEYS:
+                # PMJAY encodes the link as `valueReference.reference`; older
+                # NDHM samples use `valueUrl` / `valueUri` / `valueString`.
+                ref = sub.get("valueReference") or {}
                 documentation_url = (
                     sub.get("valueUrl")
                     or sub.get("valueUri")
                     or sub.get("valueString")
+                    or ref.get("reference")
                 )
         return ClaimSupportingInfoRequirement(
             **common,
@@ -277,9 +304,8 @@ class InsurancePlanIngestor:
         self._ingest_coverages(ip_resource, insurance_plan)
         self._ingest_plans(ip_resource, insurance_plan)
         self._ingest_questionnaires(insurance_plan)
+        self._ingest_fused_benefits(insurance_plan)
         return insurance_plan
-
-    # ─── Bundle helpers ──────────────────────────────────────────────────
 
     def _find_first(self, resource_type):
         for entry in self.entries:
@@ -293,8 +319,6 @@ class InsurancePlanIngestor:
             res = entry.get("resource") or {}
             if res.get("resourceType") == resource_type:
                 yield res
-
-    # ─── Top level ───────────────────────────────────────────────────────
 
     def _create_insurance_plan(self, ip_resource):
         identifiers = ip_resource.get("identifier") or []
@@ -328,8 +352,6 @@ class InsurancePlanIngestor:
             },
         )
 
-    # ─── Coverage subtree ────────────────────────────────────────────────
-
     def _ingest_coverages(self, ip_resource, insurance_plan):
         coverages_fhir = ip_resource.get("coverage") or []
         if not coverages_fhir:
@@ -342,6 +364,7 @@ class InsurancePlanIngestor:
                     fhir_element_id=c.get("id") or "",
                     type=c.get("type") or {},
                     type_code=_flatten_code(c.get("type")),
+                    type_display=_flatten_display(c.get("type")),
                 )
                 for c in coverages_fhir
             ],
@@ -358,6 +381,7 @@ class InsurancePlanIngestor:
                         fhir_element_id=b.get("id") or "",
                         type=b.get("type") or {},
                         type_code=_flatten_code(b.get("type")),
+                        type_display=_flatten_display(b.get("type")),
                         requirement=b.get("requirement") or "",
                     )
                 )
@@ -396,8 +420,6 @@ class InsurancePlanIngestor:
             for b_row, b_fhir in zip(benefit_rows, benefit_fhir)
         ]
         self._bulk_create_extensions(targets)
-
-    # ─── Plan subtree ────────────────────────────────────────────────────
 
     def _ingest_plans(self, ip_resource, insurance_plan):
         plans_fhir = ip_resource.get("plan") or []
@@ -468,6 +490,7 @@ class InsurancePlanIngestor:
                         fhir_element_id=b.get("id") or "",
                         type=b.get("type") or {},
                         type_code=_flatten_code(b.get("type")),
+                        type_display=_flatten_display(b.get("type")),
                     )
                 )
                 specific_cost_benefit_fhir.append(b)
@@ -532,8 +555,6 @@ class InsurancePlanIngestor:
         ]
         self._bulk_create_extensions(targets)
 
-    # ─── Polymorphic extensions ──────────────────────────────────────────
-
     def _bulk_create_extensions(self, targets):
         """Walk ``extension[]`` on each (parent_row, fhir_dict, model_cls) target
         and bulk-create the resulting Claim-* extension rows, one bucket per
@@ -553,22 +574,280 @@ class InsurancePlanIngestor:
             if rows:
                 model_cls.objects.bulk_create(rows, batch_size=self.BATCH_SIZE)
 
-    # ─── Questionnaires ──────────────────────────────────────────────────
+    def _ingest_fused_benefits(self, insurance_plan):
+        """Materialise ``InsurancePlanBenefit`` rows from coverage + specificCost
+        sources, one per (insurance_plan, plan, coverage_type_code, type_code).
+
+        Zero-plan IPs are deferred (no rows materialised; the raw catalog
+        remains accessible via ``InsurancePlanCoverageBenefit``).
+        """
+        plans = list(insurance_plan.plans.all())
+        if not plans:
+            return
+
+        cov_groups = self._group_coverage_benefits(insurance_plan)
+        questionnaire_lookup = self._build_questionnaire_lookup(insurance_plan)
+
+        rows = []
+        for plan in plans:
+            sc_by_type_code = self._index_specific_cost_benefits(plan)
+            for (_, type_code), cov_rows in cov_groups.items():
+                sc = sc_by_type_code.get(type_code)
+                rows.append(
+                    self._build_fused_row(
+                        insurance_plan,
+                        plan,
+                        cov_rows,
+                        sc,
+                        questionnaire_lookup,
+                    )
+                )
+
+        if rows:
+            InsurancePlanBenefit.objects.bulk_create(
+                rows, batch_size=self.BATCH_SIZE
+            )
+
+    def _group_coverage_benefits(self, insurance_plan):
+        benefits = (
+            InsurancePlanCoverageBenefit.objects.filter(
+                coverage__insurance_plan=insurance_plan
+            )
+            .select_related("coverage")
+            .prefetch_related(
+                "limits",
+                "claim_conditions",
+                "claim_exclusions",
+                "supporting_info_requirements",
+            )
+        )
+        groups = defaultdict(list)
+        for b in benefits:
+            key = (b.coverage.type_code or "", b.type_code or "")
+            groups[key].append(b)
+        return groups
+
+    def _index_specific_cost_benefits(self, plan):
+        """Index SpecificCostBenefit rows for this plan by ``type_code``.
+
+        SCB pricing is plan-tier specific but coverage-agnostic — the same SCB
+        applies to every coverage-section variant of a procedure within this
+        plan. Duplicate type_codes (data quality issue) are tolerated by
+        taking the first occurrence.
+        """
+        benefits = (
+            InsurancePlanPlanSpecificCostBenefit.objects.filter(
+                specific_cost__plan=plan
+            )
+            .select_related("specific_cost")
+            .prefetch_related(
+                "costs__qualifiers",
+                "claim_conditions",
+                "claim_exclusions",
+                "supporting_info_requirements",
+            )
+        )
+        indexed = {}
+        for b in benefits:
+            if b.type_code and b.type_code not in indexed:
+                indexed[b.type_code] = b
+        return indexed
+
+    def _build_questionnaire_lookup(self, insurance_plan):
+        """Build ``str -> Questionnaire.fhir_id`` lookup keyed by every known
+        URL form (fullUrl, canonical url, id, ``Questionnaire/<id>``) so
+        SISR.documentation_url can be resolved regardless of which form the
+        bundle uses.
+        """
+        lookup = {}
+        for q in insurance_plan.questionnaires.all():
+            keys = [q.full_url, q.url, q.fhir_id]
+            if q.fhir_id:
+                keys.append(f"Questionnaire/{q.fhir_id}")
+            for key in keys:
+                if key:
+                    lookup[key] = q.fhir_id
+        return lookup
+
+    def _build_fused_row(
+        self, insurance_plan, plan, cov_rows, sc, questionnaire_lookup
+    ):
+        first_cov = cov_rows[0]
+        coverage = first_cov.coverage
+
+        type_display = (
+            sc.type_display if sc and sc.type_display else first_cov.type_display
+        )
+
+        cost_values, qualifier_count, qualifier_flags = self._summarise_costs(sc)
+        max_limit_amount = self._max_limit_amount(cov_rows)
+
+        cov_conditions = []
+        cov_exclusions = []
+        cov_sisrs = []
+        for cb in cov_rows:
+            cov_conditions.extend(cb.claim_conditions.all())
+            cov_exclusions.extend(cb.claim_exclusions.all())
+            cov_sisrs.extend(cb.supporting_info_requirements.all())
+        sc_conditions = list(sc.claim_conditions.all()) if sc else []
+        sc_exclusions = list(sc.claim_exclusions.all()) if sc else []
+        sc_sisrs = list(sc.supporting_info_requirements.all()) if sc else []
+
+        merged_flags = self._merge_condition_flags(sc_conditions, cov_conditions)
+        all_sisrs = sc_sisrs + cov_sisrs
+        questionnaire_ids = self._resolve_questionnaires(
+            all_sisrs, questionnaire_lookup
+        )
+
+        specialty = sc.specific_cost if sc else None
+
+        return InsurancePlanBenefit(
+            insurance_plan=insurance_plan,
+            plan=plan,
+            coverage=coverage,
+            coverage_type_code=coverage.type_code or "",
+            coverage_type_display=coverage.type_display or "",
+            type_code=first_cov.type_code or (sc.type_code if sc else "") or "",
+            type_display=type_display or "",
+            plan_type_code=plan.type_code or None,
+            plan_type_display=_flatten_display(plan.type),
+            specialty_category_code=(specialty.category_code or None)
+            if specialty
+            else None,
+            specialty_category_display=_flatten_display(specialty.category)
+            if specialty
+            else "",
+            specific_cost_benefit=sc,
+            coverage_benefit_fhir_ids=[
+                cb.fhir_element_id for cb in cov_rows if cb.fhir_element_id
+            ],
+            min_cost=min(cost_values) if cost_values else None,
+            max_cost=max(cost_values) if cost_values else None,
+            max_limit_amount=max_limit_amount,
+            cost_count=len(cost_values),
+            qualifier_count=qualifier_count,
+            authorization_required=merged_flags["authorization_required"],
+            is_day_care=merged_flags["is_day_care"],
+            implant_applicable=merged_flags["implant_applicable"],
+            stratification_allowed=merged_flags["stratification_allowed"],
+            procedure_type=merged_flags["procedure_type"],
+            has_copayment=merged_flags["has_copayment"],
+            has_deductible=merged_flags["has_deductible"],
+            has_waiting_period=merged_flags["has_waiting_period"],
+            has_stratification_qualifier=qualifier_flags["stratification"],
+            has_implant_qualifier=qualifier_flags["implant"],
+            has_consumable_qualifier=qualifier_flags["consumable"],
+            has_questionnaire=bool(questionnaire_ids),
+            questionnaire_fhir_ids=questionnaire_ids,
+            requires_supporting_info=bool(all_sisrs),
+            supporting_info_count=len(all_sisrs),
+            condition_count=len(cov_conditions) + len(sc_conditions),
+            exclusion_count=len(cov_exclusions) + len(sc_exclusions),
+        )
+
+    def _summarise_costs(self, sc):
+        cost_values = []
+        qualifier_count = 0
+        flags = {"stratification": False, "implant": False, "consumable": False}
+        if not sc:
+            return cost_values, qualifier_count, flags
+        for cost in sc.costs.all():
+            if cost.value_amount is not None:
+                cost_values.append(cost.value_amount)
+            for q in cost.qualifiers.all():
+                qualifier_count += 1
+                if q.qualifier_type == CostQualifierType.STRATIFICATION:
+                    flags["stratification"] = True
+                elif q.qualifier_type == CostQualifierType.IMPLANT:
+                    flags["implant"] = True
+                elif q.qualifier_type in (
+                    CostQualifierType.MEDICINE,
+                    CostQualifierType.INVESTIGATION,
+                ):
+                    flags["consumable"] = True
+        return cost_values, qualifier_count, flags
+
+    def _max_limit_amount(self, cov_rows):
+        limits = [
+            lim.value_amount
+            for cb in cov_rows
+            for lim in cb.limits.all()
+            if lim.value_amount is not None
+        ]
+        return max(limits) if limits else None
+
+    def _merge_condition_flags(self, sc_conditions, cov_conditions):
+        """SC-wins-on-non-null merge for ClaimCondition typed columns."""
+
+        def pick(field):
+            for source in (sc_conditions, cov_conditions):
+                for c in source:
+                    v = getattr(c, field, None)
+                    if v is not None and v != "":
+                        return v
+            return None
+
+        approval_not_required = pick("approval_not_required")
+        authorization_required = (
+            not approval_not_required if approval_not_required is not None else True
+        )
+        # has_copayment / has_deductible / has_waiting_period are not
+        # consistently surfaced by PMJAY today; default to False until a
+        # payer-specific mapping exists.
+        return {
+            "authorization_required": authorization_required,
+            "is_day_care": pick("is_day_care"),
+            "implant_applicable": pick("implant_applicable"),
+            "stratification_allowed": pick("stratification_allowed"),
+            "procedure_type": pick("procedure_type"),
+            "has_copayment": False,
+            "has_deductible": False,
+            "has_waiting_period": False,
+        }
+
+    def _resolve_questionnaires(self, sisrs, lookup):
+        """Return sorted distinct Questionnaire.fhir_ids matched by
+        ``SISR.documentation_url``. Tries exact URL first, then falls back to
+        matching the trailing path segment against the lookup (handles cases
+        where the SISR URL host/path differs from the bundle entry's fullUrl
+        but the resource id is the same). Unmatched URLs are external links
+        and are ignored here — the raw documentation_url stays on the SISR.
+        """
+        matched = set()
+        for sisr in sisrs:
+            url = sisr.documentation_url
+            if not url:
+                continue
+            qid = lookup.get(url)
+            if not qid and "/" in url:
+                tail = url.rsplit("/", 1)[-1]
+                qid = lookup.get(tail) or lookup.get(f"Questionnaire/{tail}")
+            if qid:
+                matched.add(qid)
+        return sorted(matched)
 
     def _ingest_questionnaires(self, insurance_plan):
-        rows = [
-            InsurancePlanQuestionnaire(
-                insurance_plan=insurance_plan,
-                fhir_id=q.get("id") or "",
-                url=q.get("url") or "",
-                title=q.get("title") or "",
-                status=q.get("status") or "active",
-                subject_type=q.get("subjectType") or [],
-                purpose=q.get("purpose") or "",
-                items=q.get("item") or [],
+        # `full_url` is captured here because it is the join key against
+        # ClaimSupportingInfoRequirement.documentation_url; the resource's
+        # canonical `url` may differ or be absent in NDHM bundles.
+        rows = []
+        for entry in self.entries:
+            res = entry.get("resource") or {}
+            if res.get("resourceType") != "Questionnaire":
+                continue
+            rows.append(
+                InsurancePlanQuestionnaire(
+                    insurance_plan=insurance_plan,
+                    fhir_id=res.get("id") or "",
+                    full_url=entry.get("fullUrl") or "",
+                    url=res.get("url") or "",
+                    title=res.get("title") or "",
+                    status=res.get("status") or "active",
+                    subject_type=res.get("subjectType") or [],
+                    purpose=res.get("purpose") or "",
+                    items=res.get("item") or [],
+                )
             )
-            for q in self._iter_resources("Questionnaire")
-        ]
         if rows:
             InsurancePlanQuestionnaire.objects.bulk_create(
                 rows, batch_size=self.BATCH_SIZE
