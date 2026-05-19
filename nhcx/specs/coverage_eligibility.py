@@ -126,6 +126,7 @@ class CoverageEligibilityRequestItemSpec(BaseModel):
         # ]
         dict | None
     ) = None
+    modifier: list[dict] = []
     charge_item: UUID4 | None = None
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR

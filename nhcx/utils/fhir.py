@@ -45,7 +45,6 @@ from fhir.resources.R4B.documentreference import (
 )
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
-from fhir.resources.R4B.insuranceplan import InsurancePlan
 from fhir.resources.R4B.location import Location
 from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.money import Money
@@ -79,12 +78,12 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
-from nhcx.models.insurance_plan import InsurancePlan as InsurancePlanModel
 from nhcx.models.payment import PaymentReconciliation as PaymentReconciliationModel
 from nhcx.models.task import Task as TaskModel
 from nhcx.models.task import TaskUseCaseChoices
 from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
+from nhcx.utils.insurance_plan_ingestor import InsurancePlanIngestor
 
 CARE_IDENTIFIER_SYSTEM = settings.BACKEND_DOMAIN
 
@@ -152,7 +151,33 @@ class Fhir:
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient"],
             ),
             identifier=[
-                # FIXME: add abha number
+                # FIXME: remove this once we have a real identifier
+                Identifier(
+                    value="SBXSTG007",
+                    system="https://bis.pmjay.gov.in",
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
+                                code="PMJAY",
+                                display="Pradhan Mantri Jan Aarogya Yojana (PMJAY) ID",
+                            )
+                        ]
+                    ),
+                ),
+                # Identifier(
+                #     value="",
+                #     system="https://bis.pmjay.gov.in",
+                #     type=CodeableConcept(
+                #         coding=[
+                #             Coding(
+                #                 system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                #                 code="JHN",
+                #                 display="Jurisdictional health number",
+                #             )
+                #         ]
+                #     ),
+                # ),
                 Identifier(
                     value=id,
                     system=f"{CARE_IDENTIFIER_SYSTEM}/patient",
@@ -165,7 +190,7 @@ class Fhir:
                             )
                         ]
                     ),
-                )
+                ),
             ],
             name=[HumanName(text=patient.name)],
             telecom=[
@@ -254,6 +279,46 @@ class Fhir:
     def _organization(self, facility: FacilityModel):
         id = str(facility.external_id)
 
+        if facility.name == "SHA HP":
+            return Organization(
+                id=id,
+                meta={
+                    "profile": [
+                        "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
+                    ]
+                },
+                identifier=[
+                    # FIXME: remove this once we have a real identifier
+                    {
+                        "type": {
+                            "coding": [
+                                {
+                                    "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                                    "code": "NIIP",
+                                    "display": "National Insurance Payor Identifier (Payor)",
+                                }
+                            ]
+                        },
+                        "system": "https://facility.abdm.gov.in",
+                        "value": "1518",
+                    }
+                ],
+                active=True,
+                type=[
+                    {
+                        "coding": [
+                            {
+                                "system": "http://terminology.hl7.org/CodeSystem/organization-type",
+                                "code": "pay",
+                                "display": "Payer",
+                            }
+                        ]
+                    }
+                ],
+                name="SHA HP",
+                contact=[{"telecom": [{"system": "phone", "value": "8272905341"}]}],
+            )
+
         return Organization(
             id=id,
             meta=Meta(
@@ -263,9 +328,36 @@ class Fhir:
             ),
             identifier=[
                 # FIXME: add health facility id
+                # {
+                #         "type": {
+                #             "coding": [
+                #                 {
+                #                     "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                #                     "code": "NPI",
+                #                     "display": "National provider identifier",
+                #                 }
+                #             ]
+                #         },
+                #         "system": "https://facility.abdm.gov.in",
+                #         "value": "IN1910000151",
+                #     }
                 Identifier(
-                    system=f"{CARE_IDENTIFIER_SYSTEM}/facility",
-                    value=id,
+                    # FIXME: remove this once we have a real identifier
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="NPI",
+                                display="National provider identifier",
+                            )
+                        ]
+                    ),
+                    system="https://facility.abdm.gov.in",
+                    value="IN2910001986",
+                ),
+                Identifier(
+                    system="https://facility.abdm.gov.in",
+                    value="IN2910001986",
                     type=CodeableConcept(
                         coding=[
                             Coding(
@@ -275,7 +367,7 @@ class Fhir:
                             )
                         ]
                     ),
-                )
+                ),
             ],
             type=[
                 CodeableConcept(
@@ -453,7 +545,22 @@ class Fhir:
             meta=Meta(
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Coverage"],
             ),
-            identifier=[Identifier(value=id)],
+            # FIXME: remove this once we have a real identifier
+            identifier=[
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="NH",
+                                display="National Health Plan Identifier",
+                            )
+                        ]
+                    ),
+                    system="https://payer.nha.gov.in",
+                    value="PMJAY/HP/S/G",
+                )
+            ],
             subscriberId=coverage.policy.memberid,
             beneficiary=self._reference(
                 self._patient(
@@ -472,7 +579,7 @@ class Fhir:
                             )
                         )
                         | Q(abha_number__mobile=coverage.policy.mobilenumber)
-                        | Q(external_id="fb9e7a10-36e0-4dcf-9584-1e9c8550a78d")
+                        | Q(external_id="2b970012-eb54-4fb1-a670-1d053c9513cd")
                     )
                     .first()
                 )
@@ -658,6 +765,11 @@ class Fhir:
                         )
                         for diagnosis in item.get("diagnosis")
                     ],
+                    modifier=[
+                        self._coding_to_codable_concept(CodingSpec(**modifier))
+                        for modifier in item.get("modifier", [])
+                    ]
+                    or None,
                 )
                 for item in request.item
             ],
@@ -882,6 +994,11 @@ class Fhir:
                     )
                     if item.get("product_or_service")
                     else None,
+                    modifier=[
+                        self._coding_to_codable_concept(CodingSpec(**modifier))
+                        for modifier in item.get("modifier", [])
+                    ]
+                    or None,
                     programCode=[
                         self._coding_to_codable_concept(CodingSpec(**program_code))
                         for program_code in item.get("program_code")
@@ -1291,43 +1408,22 @@ class Fhir:
         return (task_instance, payment_reconciliation_instance, claim_instance)
 
     def process_insurance_plan_response(self, response: dict, headers: dict):
-        # Using construct to avoid fhir validation errors
-        insurance_plan_response_bundle = Bundle.construct(**response)
-
-        insurance_plan = InsurancePlan.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "InsurancePlan",
-                    insurance_plan_response_bundle.entry,
-                )
-            ).get("resource")
-        )
-
         task = TaskModel.objects.filter(
             external_id=headers.get("x-hcx-correlation_id")
         ).first()
         if not task:
             raise Exception("Correlation ID not found")
 
-        insurance_plan_instance = InsurancePlanModel.objects.create(
-            identifier=insurance_plan_response_bundle.id,
-            extension=insurance_plan.extension,
-            product_identifier=insurance_plan.identifier,
-            status=insurance_plan.status,
-            type=insurance_plan.type,
-            name=insurance_plan.name,
-            alias=insurance_plan.alias,
-            period=insurance_plan.period,
-            contact=insurance_plan.contact,
-            coverage=insurance_plan.coverage,
-            plan=insurance_plan.plan,
-            request=task,
-            meta={
-                "raw_response": response,
-                "raw_headers": headers,
-            },
-        )
+        # NDHM InsurancePlan bundles are large (often 50-100 MB once decrypted)
+        # so we skip the pydantic round-trip and hand the raw bundle dict
+        # directly to the ingestor, which fans the tree out into ~25-30k rows
+        # using bulk_create inside a single transaction.
+        insurance_plan_instance = InsurancePlanIngestor(
+            bundle=response,
+            task=task,
+            raw_response=response,
+            raw_headers=headers,
+        ).run()
 
         task.focus = insurance_plan_instance
         task.save()

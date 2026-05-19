@@ -204,6 +204,7 @@ class ClaimItemSpec(BaseModel):
     product_or_service: (
         ValueSetBoundCoding[NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.slug] | None
     ) = None
+    modifier: list[dict] = []
     charge_item: UUID4 | None = None
     program_code: list[dict] = []
     serviced_period: PeriodSpec | None = None
