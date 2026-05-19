@@ -153,6 +153,23 @@ class ClaimExclusionSpec(EMRResource):
         mapping["id"] = obj.external_id
 
 
+_REQUIRED_CODES = {"STG", "ADN"}
+
+
+def _sisr_is_required(code_code: str | None) -> bool:
+    """Return True when the supporting-info document is mandatory.
+
+    PMJAY encodes mandatoriness directly in the code:
+      - MAND-prefixed codes  →  specific mandatory diagnostic/clinical docs
+      - STG                  →  Standard Treatment Guidelines questionnaire
+      - ADN                  →  Aadhaar identity proof (universal)
+    All other codes (ODN, …) are conditional / on-demand.
+    """
+    if not code_code:
+        return False
+    return code_code.startswith("MAND") or code_code in _REQUIRED_CODES
+
+
 class ClaimSupportingInfoRequirementSpec(EMRResource):
     """``questionnaire`` is resolved at serialise time by matching
     ``documentation_url`` against the IP's bundled Questionnaires; when no
@@ -170,10 +187,12 @@ class ClaimSupportingInfoRequirementSpec(EMRResource):
     code_code: str | None = None
     documentation_url: str | None = None
     questionnaire: dict | None = None
+    is_required: bool = False
 
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
+        mapping["is_required"] = _sisr_is_required(obj.code_code)
         lookup = getattr(cls, "_questionnaire_lookup", None)
         if lookup and obj.documentation_url:
             qid = lookup.get(obj.documentation_url)
