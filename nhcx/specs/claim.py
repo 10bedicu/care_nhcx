@@ -243,6 +243,70 @@ class ClaimItemSpec(BaseModel):
         return self
 
 
+class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
+    value_boolean: bool | None = None
+    value_decimal: float | None = None
+    value_integer: int | None = None
+    value_date: str | None = None
+    value_date_time: str | None = None
+    value_time: str | None = None
+    value_string: str | None = None
+    value_uri: str | None = None
+    value_attachment: UUID4 | None = None
+    value_coding: dict | None = None
+    value_quantity: dict | None = None
+
+    @model_validator(mode="after")
+    def validate_exactly_one_value(self):
+        values = [
+            self.value_boolean,
+            self.value_decimal,
+            self.value_integer,
+            self.value_date,
+            self.value_date_time,
+            self.value_time,
+            self.value_string,
+            self.value_uri,
+            self.value_attachment,
+            self.value_coding,
+            self.value_quantity,
+        ]
+        non_null = [v for v in values if v is not None]
+        if len(non_null) != 1:
+            raise ValidationError("Exactly one value field must be set on each answer")
+        return self
+
+
+class ClaimQuestionnaireResponseItemSpec(BaseModel):
+    link_id: str
+    text: str | None = None
+    answer: list[ClaimQuestionnaireResponseAnswerSpec] = []
+    item: list["ClaimQuestionnaireResponseItemSpec"] = []
+
+
+ClaimQuestionnaireResponseItemSpec.model_rebuild()
+
+
+class ClaimQuestionnaireResponseSpec(BaseModel):
+    """
+    Questionnaire responses filled during claim entry, keyed by the
+    InsurancePlanQuestionnaire.full_url that the answers belong to.
+
+    `sequence` must be globally unique across all supportingInfo entries on
+    the claim (i.e. must not overlap with any sequence in supporting_info).
+    Convention: set it to max(supporting_info sequences) + qr_index + 1.
+
+    `category` and `code` map to the supportingInfo entry that references
+    this response in the FHIR bundle.
+    """
+
+    sequence: int
+    questionnaire: str  # InsurancePlanQuestionnaire.full_url (e.g. urn:uuid:...)
+    category: dict
+    code: dict
+    item: list[ClaimQuestionnaireResponseItemSpec] = []
+
+
 class ClaimAccidentSpec(BaseModel):
     date: datetime
     type: dict | None = None
@@ -284,6 +348,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
     item: list[ClaimItemSpec] = Field([], min_length=1)
     accident: ClaimAccidentSpec | None = None
     payee: ClaimPayeeSpec | None = None
+    questionnaire_responses: list[ClaimQuestionnaireResponseSpec] = []
 
     @field_validator("encounter")
     @classmethod
@@ -308,6 +373,69 @@ class ClaimCreateSpec(ClaimBaseSpec):
         if not Provider.objects.filter(facility__external_id=value).exists():
             raise ValidationError("Provider not found")
         return value
+
+    @model_validator(mode="after")
+    def validate_sequences(self):
+        def _check_unique(items, field, label):
+            seqs = [getattr(i, field) for i in items]
+            if len(seqs) != len(set(seqs)):
+                msg = f"Duplicate sequences in {label}"
+                raise ValidationError(msg)
+
+        def _check_refs(refs, valid_seqs, ref_label, target_label):
+            invalid = set(refs) - valid_seqs
+            if invalid:
+                msg = f"{ref_label} references unknown {target_label} sequences: {sorted(invalid)}"
+                raise ValidationError(msg)
+
+        _check_unique(self.care_team, "sequence", "care_team")
+        _check_unique(self.diagnosis, "sequence", "diagnosis")
+        _check_unique(self.procedure, "sequence", "procedure")
+        _check_unique(self.insurance, "sequence", "insurance")
+        _check_unique(self.item, "sequence", "item")
+
+        # supporting_info and questionnaire_responses both contribute to
+        # FHIR Claim.supportingInfo — their sequences must be unique together
+        supporting_seqs = [s.sequence for s in self.supporting_info]
+        qr_seqs = [q.sequence for q in self.questionnaire_responses]
+        all_info_seqs = supporting_seqs + qr_seqs
+        if len(all_info_seqs) != len(set(all_info_seqs)):
+            raise ValidationError(
+                "Duplicate sequences across supporting_info and questionnaire_responses"
+            )
+
+        valid_care_team_seqs = {ct.sequence for ct in self.care_team}
+        valid_diagnosis_seqs = {d.sequence for d in self.diagnosis}
+        valid_procedure_seqs = {p.sequence for p in self.procedure}
+        valid_info_seqs = set(all_info_seqs)
+
+        for item in self.item:
+            _check_refs(
+                item.care_team_sequence,
+                valid_care_team_seqs,
+                "item.care_team_sequence",
+                "care_team",
+            )
+            _check_refs(
+                item.diagnosis_sequence,
+                valid_diagnosis_seqs,
+                "item.diagnosis_sequence",
+                "diagnosis",
+            )
+            _check_refs(
+                item.procedure_sequence,
+                valid_procedure_seqs,
+                "item.procedure_sequence",
+                "procedure",
+            )
+            _check_refs(
+                item.information_sequence,
+                valid_info_seqs,
+                "item.information_sequence",
+                "supporting_info/questionnaire_responses",
+            )
+
+        return self
 
     def perform_extra_deserialization(self, is_update, obj):
         if self.encounter:
@@ -379,6 +507,7 @@ class ClaimListSpec(ClaimBaseSpec):
     item: list[dict] = []
     accident: dict | None = None
     payee: dict | None = None
+    questionnaire_responses: list[dict] = []
 
     provider: UUID4
     patient: UUID4

@@ -54,6 +54,11 @@ from fhir.resources.R4B.paymentreconciliation import PaymentReconciliation
 from fhir.resources.R4B.period import Period
 from fhir.resources.R4B.practitioner import Practitioner
 from fhir.resources.R4B.quantity import Quantity
+from fhir.resources.R4B.questionnaireresponse import (
+    QuestionnaireResponse,
+    QuestionnaireResponseItem,
+    QuestionnaireResponseItemAnswer,
+)
 from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.task import Task, TaskInput, TaskOutput
@@ -737,6 +742,7 @@ class Fhir:
             ],
             item=[
                 CoverageEligibilityRequestItem(
+                    sequence=item.get("sequence"),
                     supportingInfoSequence=item.get("supporting_info_sequence"),
                     category=self._coding_to_codable_concept(
                         CodingSpec(**item.get("category"))
@@ -783,6 +789,65 @@ class Fhir:
         cloned = copy(facility)
         cloned.external_id = new_external_id
         return cloned
+
+    def _qr_item(self, item: dict) -> QuestionnaireResponseItem:
+        return QuestionnaireResponseItem(
+            linkId=item["link_id"],
+            text=item.get("text"),
+            answer=[
+                QuestionnaireResponseItemAnswer(
+                    valueBoolean=answer.get("value_boolean"),
+                    valueDecimal=answer.get("value_decimal"),
+                    valueInteger=answer.get("value_integer"),
+                    valueDate=answer.get("value_date"),
+                    valueDateTime=answer.get("value_date_time"),
+                    valueTime=answer.get("value_time"),
+                    valueString=answer.get("value_string"),
+                    valueUri=answer.get("value_uri"),
+                    valueCoding=Coding(**answer["value_coding"])
+                    if answer.get("value_coding")
+                    else None,
+                    valueQuantity=Quantity(**answer["value_quantity"])
+                    if answer.get("value_quantity")
+                    else None,
+                    valueAttachment=self._attachment(
+                        FileUpload.objects.filter(
+                            external_id=answer.get("value_attachment")
+                        ).first()
+                    )
+                    if answer.get("value_attachment")
+                    else None,
+                )
+                for answer in item.get("answer", [])
+            ]
+            or None,
+            item=[self._qr_item(child) for child in item.get("item", [])] or None,
+        )
+
+    def _questionnaire_response(
+        self, qr_data: dict, patient: PatientModel
+    ) -> QuestionnaireResponse:
+        qr_id = str(uuid4())
+
+        qr = QuestionnaireResponse(
+            id=qr_id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/QuestionnaireResponse"
+                ],
+            ),
+            status="completed",
+            questionnaire=qr_data["questionnaire"],
+            subject=self._reference(self._patient(patient)),
+            authored=datetime.now(UTC).isoformat(),
+            item=[self._qr_item(item) for item in qr_data.get("item", [])] or None,
+        )
+
+        cache_key = f"QuestionnaireResponse/{qr_id}"
+        self._profiles[cache_key] = qr
+        self._resource_id_url_map[cache_key] = qr_id
+
+        return qr
 
     def _claim(self, claim: ClaimModel):
         id = str(claim.external_id)
@@ -952,31 +1017,49 @@ class Fhir:
             ]
             if claim.procedure
             else None,
-            supportingInfo=[
+            supportingInfo=(
+                [
+                    ClaimSupportingInfo(
+                        sequence=supporting_info.get("sequence"),
+                        category=self._coding_to_codable_concept(
+                            CodingSpec(**supporting_info.get("category"))
+                        ),
+                        code=self._coding_to_codable_concept(
+                            CodingSpec(**supporting_info.get("code"))
+                        ),
+                        timingPeriod=Period(**supporting_info.get("timing"))
+                        if supporting_info.get("timing")
+                        else None,
+                        valueString=supporting_info.get("value_string"),
+                        valueAttachment=self._attachment(
+                            FileUpload.objects.filter(
+                                external_id=supporting_info.get("value_attachment")
+                            ).first()
+                        )
+                        if supporting_info.get("value_attachment")
+                        else None,
+                    )
+                    for supporting_info in claim.supporting_info
+                ]
+                if claim.supporting_info
+                else []
+            )
+            + [
                 ClaimSupportingInfo(
-                    sequence=supporting_info.get("sequence"),
+                    sequence=qr_data.get("sequence"),
                     category=self._coding_to_codable_concept(
-                        CodingSpec(**supporting_info.get("category"))
+                        CodingSpec(**qr_data.get("category"))
                     ),
                     code=self._coding_to_codable_concept(
-                        CodingSpec(**supporting_info.get("code"))
+                        CodingSpec(**qr_data.get("code"))
                     ),
-                    timingPeriod=Period(**supporting_info.get("timing"))
-                    if supporting_info.get("timing")
-                    else None,
-                    valueString=supporting_info.get("value_string"),
-                    valueAttachment=self._attachment(
-                        FileUpload.objects.filter(
-                            external_id=supporting_info.get("value_attachment")
-                        ).first()
-                    )
-                    if supporting_info.get("value_attachment")
-                    else None,
+                    valueReference=self._reference(
+                        self._questionnaire_response(qr_data, claim.patient)
+                    ),
                 )
-                for supporting_info in claim.supporting_info
+                for qr_data in (claim.questionnaire_responses or [])
             ]
-            if claim.supporting_info
-            else None,
+            or None,
             item=[
                 ClaimItem(
                     sequence=item.get("sequence"),

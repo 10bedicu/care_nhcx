@@ -116,6 +116,7 @@ class CoverageEligibilityRequestItemDiagnosisSpec(BaseModel):
 
 
 class CoverageEligibilityRequestItemSpec(BaseModel):
+    sequence: int
     supporting_info_sequence: list[int] = []
     category: ValueSetBoundCoding[
         NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET.slug
@@ -206,6 +207,25 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
         if not Provider.objects.filter(facility__external_id=value).exists():
             raise ValidationError("Provider not found")
         return value
+
+    @model_validator(mode="after")
+    def validate_sequences(self):
+        def _check_unique(items, field, label):
+            seqs = [getattr(i, field) for i in items]
+            if len(seqs) != len(set(seqs)):
+                msg = f"Duplicate sequences in {label}"
+                raise ValidationError(msg)
+
+        _check_unique(self.supporting_info, "sequence", "supporting_info")
+        _check_unique(self.item, "sequence", "item")
+
+        valid_info_seqs = {s.sequence for s in self.supporting_info}
+        for item in self.item:
+            invalid = set(item.supporting_info_sequence) - valid_info_seqs
+            if invalid:
+                msg = f"item.supporting_info_sequence references unknown supporting_info sequences: {sorted(invalid)}"
+                raise ValidationError(msg)
+        return self
 
     def perform_extra_deserialization(self, is_update, obj):
         if self.encounter:

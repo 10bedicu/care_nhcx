@@ -28,6 +28,7 @@ class Claim(EMRBaseModel):
     item = models.JSONField(default=list, null=False, blank=False)
     accident = models.JSONField(null=True, blank=True)
     payee = models.JSONField(null=True, blank=True)
+    questionnaire_responses = models.JSONField(default=list, null=True, blank=True)
 
 
 class ClaimResponse(EMRBaseModel):
