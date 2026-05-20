@@ -25,7 +25,6 @@ from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
 from nhcx.specs.valuesets.coverage_eligibility import (
-    NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET,
     NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_DIAGNOSIS_CODE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
@@ -118,15 +117,8 @@ class CoverageEligibilityRequestItemDiagnosisSpec(BaseModel):
 class CoverageEligibilityRequestItemSpec(BaseModel):
     sequence: int
     supporting_info_sequence: list[int] = []
-    category: ValueSetBoundCoding[
-        NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET.slug
-    ]
-    product_or_service: (
-        # ValueSetBoundCoding[
-        #     NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.slug
-        # ]
-        dict | None
-    ) = None
+    category: dict | None = None
+    product_or_service: dict | None = None
     modifier: list[dict] = []
     charge_item: UUID4 | None = None
     quantity: Quantity | None = None

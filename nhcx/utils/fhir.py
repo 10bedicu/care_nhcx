@@ -472,12 +472,13 @@ class Fhir:
 
     def _attachment(self, attachment: FileUpload):
         id = str(attachment.external_id)
-        url = attachment.files_manager.read_signed_url(attachment)
+        content_type, content = attachment.files_manager.file_contents(attachment)
 
         return Attachment(
             id=id,
             title=attachment.name,
-            url=url,
+            contentType=content_type,
+            data=base64.b64encode(content),
         )
 
     def _coding(self, coding: CodingSpec | None):
@@ -742,7 +743,6 @@ class Fhir:
             ],
             item=[
                 CoverageEligibilityRequestItem(
-                    sequence=item.get("sequence"),
                     supportingInfoSequence=item.get("supporting_info_sequence"),
                     category=self._coding_to_codable_concept(
                         CodingSpec(**item.get("category"))
@@ -769,7 +769,7 @@ class Fhir:
                             if not diagnosis.get("diagnosis_reference")
                             else None,
                         )
-                        for diagnosis in item.get("diagnosis")
+                        for diagnosis in item.get("diagnosis") or []
                     ],
                     modifier=[
                         self._coding_to_codable_concept(CodingSpec(**modifier))
@@ -810,12 +810,13 @@ class Fhir:
                     valueQuantity=Quantity(**answer["value_quantity"])
                     if answer.get("value_quantity")
                     else None,
-                    valueAttachment=self._attachment(
-                        FileUpload.objects.filter(
+                    valueAttachment=self._attachment(file_upload)
+                    if answer.get("value_attachment")
+                    and (
+                        file_upload := FileUpload.objects.filter(
                             external_id=answer.get("value_attachment")
                         ).first()
                     )
-                    if answer.get("value_attachment")
                     else None,
                 )
                 for answer in item.get("answer", [])
@@ -1031,12 +1032,13 @@ class Fhir:
                         if supporting_info.get("timing")
                         else None,
                         valueString=supporting_info.get("value_string"),
-                        valueAttachment=self._attachment(
-                            FileUpload.objects.filter(
+                        valueAttachment=self._attachment(si_file)
+                        if supporting_info.get("value_attachment")
+                        and (
+                            si_file := FileUpload.objects.filter(
                                 external_id=supporting_info.get("value_attachment")
                             ).first()
                         )
-                        if supporting_info.get("value_attachment")
                         else None,
                     )
                     for supporting_info in claim.supporting_info
@@ -1111,8 +1113,8 @@ class Fhir:
                     else None,
                     net=Money(
                         value=(
-                            (item.get("unit_price", 0))
-                            * (item.get("quantity", {}).get("value", 1))
+                            float(item.get("unit_price", 0))
+                            * float(item.get("quantity", {}).get("value", 1))
                         ),
                         currency="INR",
                     ),
@@ -1125,8 +1127,8 @@ class Fhir:
             total=Money(
                 value=(
                     sum(
-                        (item.get("unit_price", 0))
-                        * (item.get("quantity", {}).get("value", 1))
+                        float(item.get("unit_price", 0))
+                        * float(item.get("quantity", {}).get("value", 1))
                         for item in claim.item
                     )
                 ),
@@ -1247,16 +1249,7 @@ class Fhir:
             ).get("resource")
         )
 
-        coverage_eligibility_request = CoverageEligibilityRequest.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "CoverageEligibilityRequest",
-                    coverage_eligibility_response_bundle.entry,
-                )
-            ).get("resource")
-        )
-        request_id = coverage_eligibility_request.id
+        request_id = headers.get("x-hcx-correlation_id")
 
         coverage_eligibility_request_instance = (
             CoverageEligibilityRequestModel.objects.filter(external_id=request_id)
@@ -1296,16 +1289,7 @@ class Fhir:
             ).get("resource")
         )
 
-        claim_request = Claim.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "Claim",
-                    claim_response_bundle.entry,
-                )
-            ).get("resource")
-        )
-        request_id = claim_request.id
+        request_id = headers.get("x-hcx-correlation_id")
 
         claim_instance = ClaimModel.objects.filter(external_id=request_id).first()
 

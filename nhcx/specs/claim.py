@@ -27,10 +27,8 @@ from nhcx.specs.valuesets.claim import (
     NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET,
     NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET,
     NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET,
-    NHCX_CLAIM_ITEM_CATEGORY_VALUESET,
     NHCX_CLAIM_PROCEDURE_CODE_VALUESET,
     NHCX_CLAIM_PROCEDURE_TYPE_VALUESET,
-    NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET,
     NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET,
     NHCX_CLAIM_TYPE_VALUESET,
 )
@@ -200,10 +198,8 @@ class ClaimItemSpec(BaseModel):
     diagnosis_sequence: list[int] = []
     procedure_sequence: list[int] = []
     information_sequence: list[int] = []
-    category: ValueSetBoundCoding[NHCX_CLAIM_ITEM_CATEGORY_VALUESET.slug] | None = None
-    product_or_service: (
-        ValueSetBoundCoding[NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.slug] | None
-    ) = None
+    category: dict | None = None
+    product_or_service: dict | None = None
     modifier: list[dict] = []
     charge_item: UUID4 | None = None
     program_code: list[dict] = []
@@ -275,6 +271,13 @@ class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
         if len(non_null) != 1:
             raise ValidationError("Exactly one value field must be set on each answer")
         return self
+
+    @field_validator("value_attachment")
+    @classmethod
+    def validate_value_attachment(cls, value):
+        if value and not FileUpload.objects.filter(external_id=value).exists():
+            raise ValidationError("File upload not found")
+        return value
 
 
 class ClaimQuestionnaireResponseItemSpec(BaseModel):

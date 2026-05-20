@@ -90,9 +90,8 @@ def process_nhcx_callback(self, envelope_id: int):
         if handler is None:
             # Choices field guards against this in normal flow; raise to
             # produce a permanent failure rather than silently swallowing.
-            raise ValueError(
-                f"No handler registered for callback_type={envelope.callback_type}"
-            )
+            msg = f"No handler registered for callback_type={envelope.callback_type}"
+            raise ValueError(msg)
 
         handler(decrypted, envelope.headers or {})
 
