@@ -1233,36 +1233,228 @@ class Fhir:
             ],
         )
 
+    @staticmethod
+    def _build_bundle_index(bundle_entries: list) -> dict:
+        """Return a fullUrl -> resource dict for fast reference resolution."""
+        return {
+            entry.get("fullUrl"): entry.get("resource")
+            for entry in bundle_entries
+            if entry.get("fullUrl") and entry.get("resource")
+        }
+
+    @staticmethod
+    def _resolve_ref(reference: str, bundle_index: dict) -> dict | None:
+        """
+        Resolve a FHIR relative or absolute reference against the bundle index.
+        Handles both urn:uuid: and https:// fullUrls.
+        """
+        if not reference:
+            return None
+        resource = bundle_index.get(reference)
+        if resource:
+            return resource
+        # Fallback: match by suffix (absolute URL vs urn:uuid mismatch)
+        for url, res in bundle_index.items():
+            if url and url.endswith(reference.split("/")[-1]):
+                return res
+        return None
+
+    @staticmethod
+    def _extract_identifier(identifiers: list, code: str) -> str | None:
+        """Extract a specific identifier value by type code from a FHIR identifier list."""
+        for ident in identifiers or []:
+            codings = ident.get("type", {}).get("coding", [])
+            if any(c.get("code") == code for c in codings):
+                return ident.get("value")
+        return None
+
+    @staticmethod
+    def _resolve_patient_fields(patient_resource: dict | None) -> dict:
+        """Extract flat identity fields from a FHIR Patient resource."""
+        if not patient_resource:
+            return {"pmjay_id": None, "abha_id": None, "name": None, "dob": None, "gender": None}
+        identifiers = patient_resource.get("identifier", [])
+        name_list = patient_resource.get("name", [])
+        name = None
+        if name_list:
+            name = name_list[0].get("text") or " ".join(name_list[0].get("given", []))
+        return {
+            "pmjay_id": Fhir._extract_identifier(identifiers, "PMJAY"),
+            "abha_id": Fhir._extract_identifier(identifiers, "ABHA"),
+            "name": name,
+            "dob": patient_resource.get("birthDate"),
+            "gender": patient_resource.get("gender"),
+        }
+
+    @staticmethod
+    def _resolve_coverage_fields(coverage_resource: dict | None) -> dict:
+        """Extract flat plan fields from a FHIR Coverage resource."""
+        if not coverage_resource:
+            return {"plan_name": None, "plan_id": None, "policy_period": None}
+        classes = coverage_resource.get("class", [])
+        period = coverage_resource.get("period")
+        return {
+            "plan_name": classes[0].get("name") if classes else None,
+            "plan_id": classes[0].get("value") if classes else None,
+            "policy_period": {"start": period.get("start"), "end": period.get("end")} if period else None,
+        }
+
+    @staticmethod
+    def _parse_item_balance(benefits: list) -> dict | None:
+        """Extract balance dict from validation-response benefits."""
+        allowed = next((b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None)
+        used = next((b.get("usedMoney") for b in benefits if b.get("usedMoney")), None)
+        if not (allowed or used):
+            return None
+        return {
+            "allowed": allowed or {"value": 0.0, "currency": "INR"},
+            "used": used or {"value": 0.0, "currency": "INR"},
+        }
+
+    @staticmethod
+    def _parse_item_procedure(item: dict, benefits: list) -> dict:
+        """Extract procedure dict from benefits/auth-requirements item."""
+        pos_codings = (item.get("productOrService") or {}).get("coding", [])
+        category_codings = (item.get("category") or {}).get("coding", [])
+        allowed_money = next((b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None)
+
+        required_documents = []
+        required_questionnaires = []
+        for supporting in item.get("authorizationSupporting") or []:
+            text = supporting.get("text", "")
+            code_entry = (supporting.get("coding") or [{}])[0]
+            if text.startswith("fullUrl:"):
+                required_questionnaires.append({
+                    "id": code_entry.get("code", ""),
+                    "display": code_entry.get("display", ""),
+                    "url": text.removeprefix("fullUrl:").strip(),
+                })
+            else:
+                required_documents.append({
+                    "code": code_entry.get("code", ""),
+                    "display": code_entry.get("display", ""),
+                })
+
+        return {
+            "code": pos_codings[0].get("code") if pos_codings else None,
+            "display": pos_codings[0].get("display") if pos_codings else None,
+            "category": {"code": category_codings[0].get("code"), "display": category_codings[0].get("display")} if category_codings else None,
+            "excluded": item.get("excluded", False),
+            "allowed_amount": allowed_money,
+            "authorization_required": item.get("authorizationRequired", False),
+            "required_documents": required_documents,
+            "required_questionnaires": required_questionnaires,
+        }
+
+    @staticmethod
+    def _parse_insurances(
+        fhir_insurance: list,
+        bundle_index: dict,
+        primary_pmjay_id: str | None,
+    ) -> list[dict]:
+        """
+        Dereference the FHIR insurance array into a flat, self-contained list
+        of InsuranceEntry dicts matching InsuranceEntrySpec.
+
+        Each entry resolves Coverage → Patient from the bundle index so that
+        consumers never need to touch the raw bundle.
+        """
+        entries = []
+        for ins in fhir_insurance or []:
+            coverage_ref = (ins.get("coverage") or {}).get("reference")
+            coverage_resource = Fhir._resolve_ref(coverage_ref, bundle_index)
+
+            patient_ref = (coverage_resource.get("beneficiary") or {}).get("reference") if coverage_resource else None
+            patient_resource = Fhir._resolve_ref(patient_ref, bundle_index) if patient_ref else None
+
+            patient_fields = Fhir._resolve_patient_fields(patient_resource)
+            coverage_fields = Fhir._resolve_coverage_fields(coverage_resource)
+            pmjay_id = patient_fields["pmjay_id"]
+
+            entry: dict = {
+                "pmjay_id": pmjay_id or "",
+                "is_primary": pmjay_id == primary_pmjay_id if pmjay_id else False,
+                **patient_fields,
+                "inforce": ins.get("inforce", False),
+                **coverage_fields,
+                "balance": None,
+                "procedure": None,
+            }
+
+            items = ins.get("item") or []
+            if items:
+                item = items[0]
+                benefits = item.get("benefit") or []
+                if any("usedMoney" in b for b in benefits):
+                    entry["balance"] = Fhir._parse_item_balance(benefits)
+                else:
+                    entry["procedure"] = Fhir._parse_item_procedure(item, benefits)
+
+            entries.append(entry)
+        return entries
+
     def process_coverage_eligibility_check_response(
         self, response: dict, headers: dict
     ):
         # Using construct to avoid fhir validation errors
         coverage_eligibility_response_bundle = Bundle.construct(**response)
+        bundle_entries = coverage_eligibility_response_bundle.entry or []
 
+        cer_resource = next(
+            (
+                entry.get("resource")
+                for entry in bundle_entries
+                if entry.get("resource", {}).get("resourceType")
+                == "CoverageEligibilityResponse"
+            ),
+            None,
+        )
         coverage_eligibility_response = CoverageEligibilityResponse.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "CoverageEligibilityResponse",
-                    coverage_eligibility_response_bundle.entry,
-                )
-            ).get("resource")
+            **cer_resource
         )
 
         request_id = headers.get("x-hcx-correlation_id")
-
         coverage_eligibility_request_instance = (
             CoverageEligibilityRequestModel.objects.filter(external_id=request_id)
         ).first()
 
-        # TODO: use CoverageEligibilityResponseSpec to create the instance
+        # Determine the primary PMJAY ID from the original request bundle entry.
+        # The CoverageEligibilityRequest in the bundle has insurance[0].coverage
+        # pointing to a Coverage with subscriberId = the requesting patient's PMJAY ID.
+        bundle_index = self._build_bundle_index(bundle_entries)
+        primary_pmjay_id = None
+        req_resource = next(
+            (
+                entry.get("resource")
+                for entry in bundle_entries
+                if entry.get("resource", {}).get("resourceType")
+                == "CoverageEligibilityRequest"
+            ),
+            None,
+        )
+        if req_resource:
+            req_insurances = req_resource.get("insurance") or []
+            if req_insurances:
+                req_cov_ref = (req_insurances[0].get("coverage") or {}).get(
+                    "reference"
+                )
+                req_coverage = self._resolve_ref(req_cov_ref, bundle_index)
+                if req_coverage:
+                    primary_pmjay_id = req_coverage.get("subscriberId")
+
+        insurances = self._parse_insurances(
+            fhir_insurance=coverage_eligibility_response.insurance,
+            bundle_index=bundle_index,
+            primary_pmjay_id=primary_pmjay_id,
+        )
+
         coverage_eligibility_response_instance = (
             CoverageEligibilityResponseModel.objects.create(
                 request=coverage_eligibility_request_instance,
                 outcome=coverage_eligibility_response.outcome,
                 error=coverage_eligibility_response.error,
                 disposition=coverage_eligibility_response.disposition,
-                insurance=coverage_eligibility_response.insurance,
+                insurance=insurances,
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,

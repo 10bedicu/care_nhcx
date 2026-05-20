@@ -28,5 +28,7 @@ class CoverageEligibilityResponse(EMRBaseModel):
     )
     outcome = models.CharField(max_length=100, null=False, blank=False)
     disposition = models.TextField(null=True, blank=True)
+    # Stores a dereferenced list of InsuranceEntry objects (see InsuranceEntrySpec).
+    # Raw FHIR bundle is preserved in meta["raw_response"].
     insurance = models.JSONField(null=True, blank=True)
     error = models.JSONField(null=True, blank=True)

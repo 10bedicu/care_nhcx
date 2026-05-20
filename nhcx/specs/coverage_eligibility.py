@@ -10,7 +10,7 @@ from care.emr.models.condition import Condition
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import Patient
-from care.emr.resources.base import EMRResource
+from care.emr.resources.base import EMRResource, PeriodSpec
 from care.emr.resources.charge_item.spec import ChargeItemReadSpec
 from care.emr.resources.common.quantity import Quantity
 from care.emr.resources.condition.spec import ConditionReadSpec
@@ -237,13 +237,63 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
             raise ValidationError(e.detail) from e
 
 
+class MoneySpec(BaseModel):
+    value: float
+    currency: str = "INR"
+
+
+class BalanceSpec(BaseModel):
+    allowed: MoneySpec
+    used: MoneySpec
+
+
+class RequiredDocumentSpec(BaseModel):
+    code: str
+    display: str
+
+
+class RequiredQuestionnaireSpec(BaseModel):
+    id: str
+    display: str
+    url: str
+
+
+class ProcedureSpec(BaseModel):
+    code: str
+    display: str | None = None
+    category: dict | None = None
+    excluded: bool = False
+    allowed_amount: MoneySpec | None = None
+    authorization_required: bool = False
+    required_documents: list[RequiredDocumentSpec] = []
+    required_questionnaires: list[RequiredQuestionnaireSpec] = []
+
+
+class InsuranceEntrySpec(BaseModel):
+    pmjay_id: str
+    is_primary: bool = False
+
+    name: str | None = None
+    dob: str | None = None
+    gender: str | None = None
+    abha_id: str | None = None
+
+    inforce: bool = False
+    plan_name: str | None = None
+    plan_id: str | None = None
+    policy_period: PeriodSpec | None = None
+
+    balance: BalanceSpec | None = None
+    procedure: ProcedureSpec | None = None
+
+
 class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     __model__ = CoverageEligibilityResponse
-    __exclude__ = ["request"]
+    __exclude__ = ["request", "insurance"]
 
     outcome: str
     disposition: str | None = None
-    insurance: dict | None = None
+    insurances: list[InsuranceEntrySpec] | None = None
     error: dict | None = None
     request: UUID4
 
@@ -254,6 +304,7 @@ class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
         mapping["request"] = obj.request.external_id
+        mapping["insurances"] = obj.insurance
 
 
 class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
@@ -300,7 +351,6 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
 
 
 class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestListSpec):
-
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         super().perform_extra_serialization(mapping, obj)
