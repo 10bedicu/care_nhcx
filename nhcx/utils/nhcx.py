@@ -60,7 +60,7 @@ class NHCX:
         if not correlation_id:
             raise NHCXInternalException("Correlation ID is mandatory in headers")
 
-        headers = {
+        return {
             "alg": "RSA-OAEP-256",
             "enc": "A256GCM",
             "x-hcx-timestamp": datetime.now()
@@ -79,12 +79,6 @@ class NHCX:
             "x-hcx-error_details": header_params.get("error_details") or None,
             "x-hcx-debug_details": header_params.get("debug_details") or None,
         }
-
-        print("_--------------------------------_")
-        print(headers)
-        print("_--------------------------------_")
-
-        return headers
 
     @staticmethod
     def encrypt(

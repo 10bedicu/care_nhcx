@@ -2,6 +2,7 @@ import base64
 from datetime import UTC, datetime
 from functools import wraps
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from django.db import models, transaction
 from django.db.models import Q, Value
@@ -94,12 +95,29 @@ CARE_IDENTIFIER_SYSTEM = settings.BACKEND_DOMAIN
 
 
 class Fhir:
+    _IST = ZoneInfo("Asia/Kolkata")
+
     def __init__(self):
         self._profiles = {}
         self._resource_id_url_map = {}
 
         self._participants_external_id_map = {}
         self._policies_external_id_map = {}
+
+    @classmethod
+    def _to_ist(cls, dt: datetime) -> str:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(cls._IST).replace(microsecond=0).isoformat()
+
+    @classmethod
+    def _ist_period(cls, start: str | None, end: str | None) -> Period | None:
+        if not start and not end:
+            return None
+        return Period(
+            start=cls._to_ist(datetime.fromisoformat(start)) if start else None,
+            end=cls._to_ist(datetime.fromisoformat(end)) if end else None,
+        )
 
     @staticmethod
     def cache_profiles(resource_type: str):
@@ -257,7 +275,20 @@ class Fhir:
                             )
                         ]
                     ),
-                )
+                ),
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
+                                code="HPIN",
+                                display="Health Practitioner ID issued by NDHM",
+                            )
+                        ]
+                    ),
+                    system="https://hpr.abdm.gov.in",
+                    value="khavinshankar@hpr.abdm",
+                ),
             ],
             name=[HumanName(text=user.full_name)],
             telecom=[
@@ -594,6 +625,11 @@ class Fhir:
                 self._reference(self._participant_to_organization(coverage.insurer))
             ],
             status="active",
+            period=self._ist_period(
+                coverage.policy.period.start, coverage.policy.period.end
+            )
+            if coverage.policy.period
+            else None,
         )
 
     @cache_profiles(CommunicationRequest.get_resource_type())
@@ -613,7 +649,9 @@ class Fhir:
             category=[CodeableConcept(**category) for category in request.category]
             if request.category
             else None,
-            authoredOn=request.authored_on.isoformat() if request.authored_on else None,
+            authoredOn=self._to_ist(request.authored_on)
+            if request.authored_on
+            else None,
             payload=[
                 CommunicationRequestPayload(**payload) for payload in request.payload
             ]
@@ -641,7 +679,7 @@ class Fhir:
                 self._coding_to_codable_concept(CodingSpec(**coding))
                 for coding in communication.category
             ],
-            sent=communication.sent.isoformat() if communication.sent else None,
+            sent=self._to_ist(communication.sent) if communication.sent else None,
             payload=[
                 CommunicationPayload(
                     contentString=payload.get("content_string"),
@@ -690,7 +728,7 @@ class Fhir:
                 )
             ),
             purpose=request.purpose,
-            created=request.created_date.isoformat(),
+            created=self._to_ist(request.created_date),
             patient=self._reference(self._patient(request.patient)),
             enterer=self._reference(self._practitioner(request.created_by)),
             provider=self._reference(self._organization(request.provider.facility)),
@@ -840,7 +878,7 @@ class Fhir:
             status="completed",
             questionnaire=qr_data["questionnaire"],
             subject=self._reference(self._patient(patient)),
-            authored=datetime.now(UTC).isoformat(),
+            authored=self._to_ist(datetime.now(UTC)),
             item=[self._qr_item(item) for item in qr_data.get("item", [])] or None,
         )
 
@@ -853,12 +891,41 @@ class Fhir:
     def _claim(self, claim: ClaimModel):
         id = str(claim.external_id)
 
+        _all_si_seqs = [
+            si.get("sequence", 0) for si in (claim.supporting_info or [])
+        ] + [qr.get("sequence", 0) for qr in (claim.questionnaire_responses or [])]
+        _next_seq = (max(_all_si_seqs) + 1) if _all_si_seqs else 1
+        _raw_dt = (
+            claim.encounter.period.get("start")
+            if claim.encounter and claim.encounter.period
+            else None
+        )
+        _encounter_dt = (
+            self._to_ist(datetime.fromisoformat(_raw_dt))
+            if _raw_dt
+            else self._to_ist(claim.created_date)
+        )
+
         return Claim(
             id=id,
             meta=Meta(
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Claim"],
             ),
-            identifier=[Identifier(value=id)],
+            identifier=[
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="https://www.nrces.in/preview/ndhm/fhir/r4/ValueSet-ndhm-identifier-type-code.html",
+                                code="CLN",
+                                display="Claim number",
+                            )
+                        ]
+                    ),
+                    system=f"urn:uuid:{id}",
+                    value=id,
+                )
+            ],
             status=claim.status,
             type=self._coding_to_codable_concept(CodingSpec(**claim.type)),
             use=claim.use,
@@ -868,7 +935,7 @@ class Fhir:
                     code=claim.priority,
                 )
             ),
-            created=claim.created_date.isoformat(),
+            created=self._to_ist(claim.created_date),
             billablePeriod=Period(**claim.billable_period)
             if claim.billable_period
             else None,
@@ -1061,9 +1128,48 @@ class Fhir:
                 )
                 for qr_data in (claim.questionnaire_responses or [])
             ]
+            + [
+                ClaimSupportingInfo(
+                    sequence=_next_seq,
+                    category=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                            code="ONS",
+                            display="Period, start or end dates of aspects of the Condition. (e.g. admission, discharge etc)",
+                        )
+                    ),
+                    code=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
+                            code="ADDD",
+                            display="Admission date -Discharge date",
+                        )
+                    ),
+                    valueString=_encounter_dt,
+                ),
+                ClaimSupportingInfo(
+                    sequence=_next_seq + 1,
+                    category=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                            code="OTH",
+                            display="Other",
+                        )
+                    ),
+                    code=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
+                            code="EDT",
+                            display="EncounterDateTime",
+                        )
+                    ),
+                    valueString=_encounter_dt,
+                ),
+            ]
             or None,
             item=[
                 ClaimItem(
+                    id=f"item-{item.get('sequence')}",
                     sequence=item.get("sequence"),
                     careTeamSequence=item.get("care_team_sequence"),
                     diagnosisSequence=item.get("diagnosis_sequence"),
@@ -1090,9 +1196,10 @@ class Fhir:
                     ]
                     if item.get("program_code")
                     else None,
-                    servicedPeriod=Period(**item.get("serviced_period"))
-                    if item.get("serviced_period")
-                    else None,
+                    servicedPeriod=self._ist_period(
+                        item.get("serviced_period", {}).get("start"),
+                        item.get("serviced_period", {}).get("end"),
+                    ),
                     unitPrice=Money(
                         value=item.get("unit_price"),
                         currency="INR",
@@ -1180,11 +1287,11 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/CoverageEligibilityRequestBundle"
                 ],
-                lastUpdated=coverage_eligibility_request.modified_date.isoformat(),
+                lastUpdated=self._to_ist(coverage_eligibility_request.modified_date),
             ),
             identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
             type="collection",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=self._to_ist(datetime.now(UTC)),
             entry=[
                 self._bundle_entry(
                     self._coverage_eligibility_request(coverage_eligibility_request)
@@ -1202,11 +1309,11 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ClaimBundle"
                 ],
-                lastUpdated=claim.modified_date.isoformat(),
+                lastUpdated=self._to_ist(claim.modified_date),
             ),
             identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
             type="collection",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=self._to_ist(datetime.now(UTC)),
             entry=[
                 self._bundle_entry(self._claim(claim)),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
@@ -1222,11 +1329,11 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/TaskBundle"
                 ],
-                lastUpdated=task.modified_date.isoformat(),
+                lastUpdated=self._to_ist(task.modified_date),
             ),
             identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
             type="collection",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=self._to_ist(datetime.now(UTC)),
             entry=[
                 self._bundle_entry(self._task(task)),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
