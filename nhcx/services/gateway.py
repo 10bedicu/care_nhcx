@@ -97,13 +97,16 @@ class GatewayService:
         return response.json()
 
     @staticmethod
-    def pre_auth__submit(payload: str) -> dict:
+    def pre_auth__submit(payload: str, biometric_auth_token: str | None = None) -> dict:
         path = "/v1/preauth/submit"
 
         response = GatewayService.request.post(
             path,
             {"payload": payload},
-            headers=GatewayService.headers(),
+            headers={
+                **GatewayService.headers(),
+                "X-User-Token": biometric_auth_token,
+            },
         )
 
         if response.status_code != status.HTTP_202_ACCEPTED:

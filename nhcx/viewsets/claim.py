@@ -15,6 +15,7 @@ from care.emr.api.viewsets.base import (
     EMRRetrieveMixin,
 )
 from nhcx.models.claim import Claim
+from nhcx.models.member_biometric_auth import MemberBiometricAuth
 from nhcx.models.task import Task, TaskUseCaseChoices
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.claim import (
@@ -94,11 +95,20 @@ class ClaimViewSet(
             workflow_id="15" if claim.use == ClaimUseChoices.CLAIM else "12",
         )
 
+        biometric_auth = MemberBiometricAuth.objects.filter(
+            encounter=claim.encounter,
+            patient=claim.patient,
+            payer_id=claim.insurer.get("participant_code"),
+        ).first()
+        biometric_auth_token = biometric_auth.token if biometric_auth else None
+
         _response = None
         if claim.use == ClaimUseChoices.CLAIM:
             _response = GatewayService.claim__submit(encrypted_payload)
         elif claim.use == ClaimUseChoices.PRE_AUTHORIZATION:
-            _response = GatewayService.pre_auth__submit(encrypted_payload)
+            _response = GatewayService.pre_auth__submit(
+                encrypted_payload, biometric_auth_token
+            )
         elif claim.use == ClaimUseChoices.PRE_DETERMINATION:
             _response = GatewayService.predetermination__submit(encrypted_payload)
 
