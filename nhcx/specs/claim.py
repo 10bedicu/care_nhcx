@@ -20,6 +20,7 @@ from care.emr.resources.file_upload.spec import FileUploadRetrieveSpec
 from care.emr.resources.user.spec import UserSpec
 from care.emr.utils.valueset_coding_type import ValueSetBoundCoding
 from nhcx.models.claim import Claim, ClaimResponse
+from nhcx.models.insurance_plan import InsurancePlanQuestionnaire
 from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
@@ -203,7 +204,7 @@ class ClaimItemSpec(BaseModel):
     modifier: list[dict] = []
     charge_item: UUID4 | None = None
     program_code: list[dict] = []
-    serviced_period: PeriodSpec | None = None
+    serviced_period: PeriodSpec
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
     factor: float | None = None
@@ -253,7 +254,7 @@ class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
     value_quantity: dict | None = None
 
     @model_validator(mode="after")
-    def validate_exactly_one_value(self):
+    def validate_at_most_one_value(self):
         values = [
             self.value_boolean,
             self.value_decimal,
@@ -268,8 +269,8 @@ class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
             self.value_quantity,
         ]
         non_null = [v for v in values if v is not None]
-        if len(non_null) != 1:
-            raise ValidationError("Exactly one value field must be set on each answer")
+        if len(non_null) > 1:
+            raise ValidationError("At most one value field may be set on each answer")
         return self
 
     @field_validator("value_attachment")
@@ -308,6 +309,28 @@ class ClaimQuestionnaireResponseSpec(BaseModel):
     category: dict
     code: dict
     item: list[ClaimQuestionnaireResponseItemSpec] = []
+
+
+def _collect_required_link_ids(fhir_items: list) -> set[str]:
+    """Recursively collect linkIds that are marked required=True in a FHIR Questionnaire items list."""
+    required: set[str] = set()
+    for item in fhir_items or []:
+        if item.get("required", False):
+            link_id = item.get("linkId") or item.get("link_id")
+            if link_id:
+                required.add(link_id)
+        required.update(_collect_required_link_ids(item.get("item") or []))
+    return required
+
+
+def _collect_answered_link_ids(response_items) -> set[str]:
+    """Recursively collect linkIds that have at least one answer in a QuestionnaireResponse items list."""
+    answered: set[str] = set()
+    for item in response_items or []:
+        if item.answer:
+            answered.add(item.link_id)
+        answered.update(_collect_answered_link_ids(item.item))
+    return answered
 
 
 class ClaimAccidentSpec(BaseModel):
@@ -440,6 +463,29 @@ class ClaimCreateSpec(ClaimBaseSpec):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_questionnaire_responses_content(self):
+        for qr in self.questionnaire_responses:
+            questionnaire = InsurancePlanQuestionnaire.objects.filter(
+                full_url=qr.questionnaire
+            ).first() or InsurancePlanQuestionnaire.objects.filter(
+                url=qr.questionnaire
+            ).first()
+            if not questionnaire or not questionnaire.items:
+                continue
+
+            required_link_ids = _collect_required_link_ids(questionnaire.items)
+            if not required_link_ids:
+                continue
+
+            answered_link_ids = _collect_answered_link_ids(qr.item)
+            missing = required_link_ids - answered_link_ids
+            if missing:
+                msg = f"Required questionnaire items missing for '{qr.questionnaire}': {sorted(missing)}"
+                raise ValidationError(msg)
+
+        return self
+
     def perform_extra_deserialization(self, is_update, obj):
         if self.encounter:
             obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
@@ -450,7 +496,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1000003538@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
+                    participant_code="1518@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
