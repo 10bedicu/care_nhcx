@@ -352,9 +352,12 @@ class InsurancePlanIngestor:
         administered_by = (
             _resolve_reference(self.entries, ip_resource.get("administeredBy")) or {}
         )
+        fhir_id = ip_resource.get("id")
+        if fhir_id:
+            InsurancePlan.objects.filter(fhir_id=fhir_id).delete()
         return InsurancePlan.objects.create(
             request=self.task,
-            fhir_id=ip_resource.get("id"),
+            fhir_id=fhir_id,
             identifier_system=primary.get("system") or "",
             identifier_value=primary.get("value") or "",
             additional_identifiers=identifiers[1:],
