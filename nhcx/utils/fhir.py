@@ -626,9 +626,10 @@ class Fhir:
             ],
             status="active",
             period=self._ist_period(
-                coverage.policy.period.start, coverage.policy.period.end
+                coverage.policy.policy_period.start,
+                coverage.policy.policy_period.end,
             )
-            if coverage.policy.period
+            if coverage.policy.policy_period
             else None,
         )
 
