@@ -1596,12 +1596,18 @@ class Fhir:
         # TODO: use ClaimResponseSpec to create the instance
         claim_response_instance = ClaimResponseModel.objects.create(
             request=claim_instance,
+            use=claim_response.use,
+            status=claim_response.status,
             outcome=claim_response.outcome,
-            error=claim_response.error,
             disposition=claim_response.disposition,
+            pre_auth_ref=getattr(claim_response, "preAuthRef", None),
+            adjudication=claim_response.adjudication,
+            identifier=claim_response.identifier,
+            type=claim_response.type,
             item=claim_response.item,
             add_item=claim_response.addItem,
             total=claim_response.total,
+            error=claim_response.error,
             meta={
                 "raw_response": response,
                 "raw_headers": headers,
@@ -1855,12 +1861,18 @@ class Fhir:
             # TODO: use ClaimResponseSpec to create the instance
             claim_response_instance = ClaimResponseModel.objects.create(
                 request=claim_instance,
+                use=claim_response.use,
+                status=claim_response.status,
                 outcome=claim_response.outcome,
-                error=claim_response.error,
                 disposition=claim_response.disposition,
+                pre_auth_ref=getattr(claim_response, "preAuthRef", None),
+                adjudication=claim_response.adjudication,
+                identifier=claim_response.identifier,
+                type=claim_response.type,
                 item=claim_response.item,
                 add_item=claim_response.addItem,
                 total=claim_response.total,
+                error=claim_response.error,
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,

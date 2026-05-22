@@ -523,12 +523,22 @@ class ClaimResponseRetrieveSpec(EMRResource):
     __model__ = ClaimResponse
     __exclude__ = ["request"]
 
+    use: str | None = None
+    status: str | None = None
     outcome: str
     disposition: str | None = None
-    item: dict | None = None
-    add_item: dict | None = None
-    total: dict | None = None
-    error: dict | None = None
+    # Payer-assigned pre-authorization number — only present on pre-auth approvals.
+    # Must be included when submitting the final claim.
+    pre_auth_ref: str | None = None
+    # Claim-level adjudication list; carries the machine-readable status code
+    # (approved / queried / rejected) as opposed to the FHIR outcome enum.
+    adjudication: list | None = None
+    identifier: list | None = None
+    type: dict | None = None
+    item: list | None = None
+    add_item: list | None = None
+    total: list | None = None
+    error: list | None = None
     request: UUID4
 
     created_date: datetime | None = None
