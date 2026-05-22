@@ -201,9 +201,13 @@ class ClaimSupportingInfoRequirementSpec(EMRResource):
                 qid = lookup.get(tail) or lookup.get(f"Questionnaire/{tail}")
             if qid:
                 titles = getattr(cls, "_questionnaire_titles", {})
+                full_urls = getattr(cls, "_questionnaire_full_urls", {})
+                external_ids = getattr(cls, "_questionnaire_external_ids", {})
                 mapping["questionnaire"] = {
+                    "id": external_ids.get(qid, ""),
                     "fhir_id": qid,
                     "title": titles.get(qid, ""),
+                    "full_url": full_urls.get(qid, ""),
                 }
 
 
@@ -554,8 +558,12 @@ def _attach_questionnaire_lookup(insurance_plan):
     field without an N+1 query."""
     lookup = {}
     titles = {}
+    full_urls = {}
+    external_ids = {}
     for q in insurance_plan.questionnaires.all():
         titles[q.fhir_id] = q.title or ""
+        full_urls[q.fhir_id] = q.full_url or ""
+        external_ids[q.fhir_id] = str(q.external_id)
         for key in (q.full_url, q.url, q.fhir_id):
             if key:
                 lookup[key] = q.fhir_id
@@ -563,8 +571,12 @@ def _attach_questionnaire_lookup(insurance_plan):
             lookup[f"Questionnaire/{q.fhir_id}"] = q.fhir_id
     ClaimSupportingInfoRequirementSpec._questionnaire_lookup = lookup  # noqa: SLF001
     ClaimSupportingInfoRequirementSpec._questionnaire_titles = titles  # noqa: SLF001
+    ClaimSupportingInfoRequirementSpec._questionnaire_full_urls = full_urls  # noqa: SLF001
+    ClaimSupportingInfoRequirementSpec._questionnaire_external_ids = external_ids  # noqa: SLF001
 
 
 def _detach_questionnaire_lookup():
     ClaimSupportingInfoRequirementSpec._questionnaire_lookup = None  # noqa: SLF001
     ClaimSupportingInfoRequirementSpec._questionnaire_titles = None  # noqa: SLF001
+    ClaimSupportingInfoRequirementSpec._questionnaire_full_urls = None  # noqa: SLF001
+    ClaimSupportingInfoRequirementSpec._questionnaire_external_ids = None  # noqa: SLF001

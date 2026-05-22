@@ -371,27 +371,27 @@ class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestListSpec)
         if obj.item:
             mapping["item"] = []
             for item in obj.item:
-                parsed = {**item}
+                parsed_item = {**item}
                 if item.get("charge_item"):
                     charge_item = get_object_or_404(
                         ChargeItem, external_id=item.get("charge_item")
                     )
-                    parsed["charge_item"] = ChargeItemReadSpec.serialize(
+                    parsed_item["charge_item"] = ChargeItemReadSpec.serialize(
                         charge_item
                     ).to_json()
 
                 if item.get("diagnosis"):
-                    mapping["diagnosis"] = []
+                    parsed_item["diagnosis"] = []
                     for diagnosis in item.get("diagnosis"):
-                        parsed = {**diagnosis}
+                        parsed_diagnosis = {**diagnosis}
                         if diagnosis.get("diagnosis_reference"):
                             condition = get_object_or_404(
                                 Condition,
                                 external_id=diagnosis.get("diagnosis_reference"),
                             )
-                            parsed["diagnosis_reference"] = ConditionReadSpec.serialize(
-                                condition
-                            ).to_json()
-                        mapping["diagnosis"].append(parsed)
+                            parsed_diagnosis["diagnosis_reference"] = (
+                                ConditionReadSpec.serialize(condition).to_json()
+                            )
+                        parsed_item["diagnosis"].append(parsed_diagnosis)
 
-                mapping["item"].append(parsed)
+                mapping["item"].append(parsed_item)
