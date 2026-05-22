@@ -1,4 +1,5 @@
 import base64
+import logging
 from datetime import UTC, datetime
 from functools import wraps
 from uuid import uuid4
@@ -70,6 +71,9 @@ from care.emr.models.condition import Condition as ConditionModel
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.file_upload import FileUpload as FileUploadModel
 from care.emr.models.patient import Patient as PatientModel
+from care.emr.models.report.report_upload import ReportUpload as ReportUploadModel
+from care.emr.models.report.template import Template as ReportTemplate
+from care.emr.reports.report_utils import generate_and_upload_report
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
@@ -91,7 +95,25 @@ from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
 from nhcx.utils.insurance_plan_ingestor import InsurancePlanIngestor
 
+logger = logging.getLogger(__name__)
+
 CARE_IDENTIFIER_SYSTEM = settings.BACKEND_DOMAIN
+
+# Maps CARE DischargeDispositionChoices values → (NDHM code, display) for
+# Claim.supportingInfo[category=DIS] entries.
+_DISCHARGE_DISPOSITION_NDHM_MAP: dict[str, tuple[str, str]] = {
+    "home": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "alt_home": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "aadvice": ("LAMA", "Left Against Medical Advice"),
+    "exp": ("DTM", "DischargeToMortuary (Discharge disposition status)"),
+    "other_hcf": ("DAMA", "Discharged Against Medical Advice"),
+    "hosp": ("DAMA", "Discharged Against Medical Advice"),
+    "long": ("DAMA", "Discharged Against Medical Advice"),
+    "psy": ("DAMA", "Discharged Against Medical Advice"),
+    "rehab": ("DAMA", "Discharged Against Medical Advice"),
+    "snf": ("DAMA", "Discharged Against Medical Advice"),
+    "oth": ("DAMA", "Discharged Against Medical Advice"),
+}
 
 
 class Fhir:
@@ -907,6 +929,81 @@ class Fhir:
             else self._to_ist(claim.created_date)
         )
 
+        _related_pre_auth_refs = []
+        for _related in claim.related or []:
+            _related_claim = ClaimModel.objects.filter(
+                external_id=_related.get("claim")
+            ).first()
+            if _related_claim:
+                _related_response = (
+                    ClaimResponseModel.objects.filter(
+                        request=_related_claim, pre_auth_ref__isnull=False
+                    )
+                    .exclude(pre_auth_ref="")
+                    .order_by("-created_date")
+                    .first()
+                )
+                if _related_response and _related_response.pre_auth_ref:
+                    _related_pre_auth_refs.append(_related_response.pre_auth_ref)
+
+        _raw_disposition = (
+            (claim.encounter.hospitalization or {}).get("discharge_disposition")
+            if claim.encounter
+            else None
+        )
+        _dis_code, _dis_display = _DISCHARGE_DISPOSITION_NDHM_MAP.get(
+            _raw_disposition or "",
+            ("DTH", "DischargeToHome (Discharge disposition status)"),
+        )
+
+        _discharge_summary_attachment = None
+        if claim.use == "claim" and claim.encounter:
+            encounter_id = str(claim.encounter.external_id)
+            report_upload = (
+                ReportUploadModel.objects.filter(
+                    report_type="discharge_summary",
+                    associating_id=encounter_id,
+                    upload_completed=True,
+                    is_archived=False,
+                )
+                .order_by("-created_date")
+                .first()
+            )
+            if not report_upload:
+                template = ReportTemplate.objects.filter(
+                    template_type="discharge_summary",
+                    status="active",
+                ).first()
+                if template:
+                    try:
+                        report_upload = generate_and_upload_report(
+                            template=template,
+                            report_type="discharge_summary",
+                            associating_id=encounter_id,
+                            output_format=template.default_format or "pdf",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to generate discharge summary for claim %s",
+                            claim.external_id,
+                        )
+            if report_upload:
+                try:
+                    content_type, content = report_upload.files_manager.file_contents(
+                        report_upload
+                    )
+                    _discharge_summary_attachment = Attachment(
+                        id=str(report_upload.external_id),
+                        title=report_upload.name,
+                        contentType=content_type,
+                        data=base64.b64encode(content),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to read discharge summary for claim %s",
+                        claim.external_id,
+                    )
+
         return Claim(
             id=id,
             meta=Meta(
@@ -956,6 +1053,7 @@ class Fhir:
                             Participant(**claim.insurer),
                         )
                     ),
+                    preAuthRef=_related_pre_auth_refs or None,
                 )
                 for insurance in claim.insurance
             ],
@@ -1167,6 +1265,30 @@ class Fhir:
                     valueString=_encounter_dt,
                 ),
             ]
+            + (
+                [
+                    ClaimSupportingInfo(
+                        sequence=_next_seq + 2,
+                        category=self._coding_to_codable_concept(
+                            CodingSpec(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                                code="DIS",
+                                display="Discharge status and discharge to location detail",
+                            )
+                        ),
+                        code=self._coding_to_codable_concept(
+                            CodingSpec(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                                code=_dis_code,
+                                display=_dis_display,
+                            )
+                        ),
+                        valueAttachment=_discharge_summary_attachment,
+                    )
+                ]
+                if _discharge_summary_attachment
+                else []
+            )
             or None,
             item=[
                 ClaimItem(
@@ -1380,7 +1502,13 @@ class Fhir:
     def _resolve_patient_fields(patient_resource: dict | None) -> dict:
         """Extract flat identity fields from a FHIR Patient resource."""
         if not patient_resource:
-            return {"pmjay_id": None, "abha_id": None, "name": None, "dob": None, "gender": None}
+            return {
+                "pmjay_id": None,
+                "abha_id": None,
+                "name": None,
+                "dob": None,
+                "gender": None,
+            }
         identifiers = patient_resource.get("identifier", [])
         name_list = patient_resource.get("name", [])
         name = None
@@ -1404,13 +1532,17 @@ class Fhir:
         return {
             "plan_name": classes[0].get("name") if classes else None,
             "plan_id": classes[0].get("value") if classes else None,
-            "policy_period": {"start": period.get("start"), "end": period.get("end")} if period else None,
+            "policy_period": {"start": period.get("start"), "end": period.get("end")}
+            if period
+            else None,
         }
 
     @staticmethod
     def _parse_item_balance(benefits: list) -> dict | None:
         """Extract balance dict from validation-response benefits."""
-        allowed = next((b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None)
+        allowed = next(
+            (b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None
+        )
         used = next((b.get("usedMoney") for b in benefits if b.get("usedMoney")), None)
         if not (allowed or used):
             return None
@@ -1424,7 +1556,9 @@ class Fhir:
         """Extract procedure dict from benefits/auth-requirements item."""
         pos_codings = (item.get("productOrService") or {}).get("coding", [])
         category_codings = (item.get("category") or {}).get("coding", [])
-        allowed_money = next((b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None)
+        allowed_money = next(
+            (b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None
+        )
 
         required_documents = []
         required_questionnaires = []
@@ -1432,21 +1566,30 @@ class Fhir:
             text = supporting.get("text", "")
             code_entry = (supporting.get("coding") or [{}])[0]
             if text.startswith("fullUrl:"):
-                required_questionnaires.append({
-                    "id": code_entry.get("code", ""),
-                    "display": code_entry.get("display", ""),
-                    "url": text.removeprefix("fullUrl:").strip(),
-                })
+                required_questionnaires.append(
+                    {
+                        "id": code_entry.get("code", ""),
+                        "display": code_entry.get("display", ""),
+                        "url": text.removeprefix("fullUrl:").strip(),
+                    }
+                )
             else:
-                required_documents.append({
-                    "code": code_entry.get("code", ""),
-                    "display": code_entry.get("display", ""),
-                })
+                required_documents.append(
+                    {
+                        "code": code_entry.get("code", ""),
+                        "display": code_entry.get("display", ""),
+                    }
+                )
 
         return {
             "code": pos_codings[0].get("code") if pos_codings else None,
             "display": pos_codings[0].get("display") if pos_codings else None,
-            "category": {"code": category_codings[0].get("code"), "display": category_codings[0].get("display")} if category_codings else None,
+            "category": {
+                "code": category_codings[0].get("code"),
+                "display": category_codings[0].get("display"),
+            }
+            if category_codings
+            else None,
             "excluded": item.get("excluded", False),
             "allowed_amount": allowed_money,
             "authorization_required": item.get("authorizationRequired", False),
@@ -1472,8 +1615,14 @@ class Fhir:
             coverage_ref = (ins.get("coverage") or {}).get("reference")
             coverage_resource = Fhir._resolve_ref(coverage_ref, bundle_index)
 
-            patient_ref = (coverage_resource.get("beneficiary") or {}).get("reference") if coverage_resource else None
-            patient_resource = Fhir._resolve_ref(patient_ref, bundle_index) if patient_ref else None
+            patient_ref = (
+                (coverage_resource.get("beneficiary") or {}).get("reference")
+                if coverage_resource
+                else None
+            )
+            patient_resource = (
+                Fhir._resolve_ref(patient_ref, bundle_index) if patient_ref else None
+            )
 
             patient_fields = Fhir._resolve_patient_fields(patient_resource)
             coverage_fields = Fhir._resolve_coverage_fields(coverage_resource)
@@ -1543,9 +1692,7 @@ class Fhir:
         if req_resource:
             req_insurances = req_resource.get("insurance") or []
             if req_insurances:
-                req_cov_ref = (req_insurances[0].get("coverage") or {}).get(
-                    "reference"
-                )
+                req_cov_ref = (req_insurances[0].get("coverage") or {}).get("reference")
                 req_coverage = self._resolve_ref(req_cov_ref, bundle_index)
                 if req_coverage:
                     primary_pmjay_id = req_coverage.get("subscriberId")

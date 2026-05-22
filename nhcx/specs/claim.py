@@ -31,7 +31,6 @@ from nhcx.specs.valuesets.claim import (
     NHCX_CLAIM_PROCEDURE_CODE_VALUESET,
     NHCX_CLAIM_PROCEDURE_TYPE_VALUESET,
     NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET,
-    NHCX_CLAIM_TYPE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
 
@@ -360,7 +359,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
     use: ClaimUseChoices
     status: ClaimStatusChoices
     priority: ClaimPriorityChoices
-    type: ValueSetBoundCoding[NHCX_CLAIM_TYPE_VALUESET.slug]
+    type: dict
     facility: UUID4
     patient: UUID4
     encounter: UUID4 | None = None
