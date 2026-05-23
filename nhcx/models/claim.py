@@ -29,6 +29,8 @@ class Claim(EMRBaseModel):
     accident = models.JSONField(null=True, blank=True)
     payee = models.JSONField(null=True, blank=True)
     questionnaire_responses = models.JSONField(default=list, null=True, blank=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    dispatch_error = models.TextField(blank=True, default="")
 
 
 class ClaimResponse(EMRBaseModel):

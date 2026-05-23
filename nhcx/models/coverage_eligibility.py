@@ -20,6 +20,8 @@ class CoverageEligibilityRequest(EMRBaseModel):
     supporting_info = models.JSONField(default=list, null=True, blank=True)
     insurance = models.JSONField(default=list, null=False, blank=False)
     item = models.JSONField(default=list, null=True, blank=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    dispatch_error = models.TextField(blank=True, default="")
 
 
 class CoverageEligibilityResponse(EMRBaseModel):

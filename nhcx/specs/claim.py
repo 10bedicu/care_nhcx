@@ -465,11 +465,14 @@ class ClaimCreateSpec(ClaimBaseSpec):
     @model_validator(mode="after")
     def validate_questionnaire_responses_content(self):
         for qr in self.questionnaire_responses:
-            questionnaire = InsurancePlanQuestionnaire.objects.filter(
-                full_url=qr.questionnaire
-            ).first() or InsurancePlanQuestionnaire.objects.filter(
-                url=qr.questionnaire
-            ).first()
+            questionnaire = (
+                InsurancePlanQuestionnaire.objects.filter(
+                    full_url=qr.questionnaire
+                ).first()
+                or InsurancePlanQuestionnaire.objects.filter(
+                    url=qr.questionnaire
+                ).first()
+            )
             if not questionnaire or not questionnaire.items:
                 continue
 
@@ -566,6 +569,9 @@ class ClaimListSpec(ClaimBaseSpec):
     accident: dict | None = None
     payee: dict | None = None
     questionnaire_responses: list[dict] = []
+
+    dispatched_at: datetime | None = None
+    dispatch_error: str = ""
 
     provider: UUID4
     patient: UUID4

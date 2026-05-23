@@ -20,6 +20,7 @@ from nhcx.specs.coverage_eligibility import (
     CoverageEligibilityRequestListSpec,
     CoverageEligibilityRequestRetrieveSpec,
 )
+from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -99,7 +100,11 @@ class CoverageEligibilityRequestViewSet(
             status="request.initiated",
         )
 
-        _response = GatewayService.coverage_eligibility__check(encrypted_payload)
+        dispatch(
+            coverage_eligibility_request,
+            GatewayService.coverage_eligibility__check,
+            encrypted_payload,
+        )
 
         return Response(
             CoverageEligibilityRequestRetrieveSpec.serialize(

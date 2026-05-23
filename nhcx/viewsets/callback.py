@@ -149,7 +149,7 @@ def _record_error_callback(request):
         _extract_error_metadata(request)
     )
 
-    NHCXInboundEnvelope.objects.create(
+    envelope = NHCXInboundEnvelope.objects.create(
         correlation_id=correlation_id,
         api_call_id=api_call_id,
         callback_type=CallbackTypeChoices.ERROR_RESPONSE,
@@ -160,6 +160,14 @@ def _record_error_callback(request):
         processed_at=timezone.now(),
         error_message=err_msg[:8000],
     )
+
+    if correlation_id and err_msg:
+        _attach_error_to_anchor(
+            correlation_id=correlation_id,
+            error_details={"message": err_msg},
+            callback_type=CallbackTypeChoices.ERROR_RESPONSE,
+            envelope_id=envelope.pk,
+        )
 
     return Response({}, status=status.HTTP_202_ACCEPTED)
 
@@ -180,7 +188,9 @@ def _handle_protocol_response(request, callback_type: CallbackTypeChoices):
     single ``status == "failed"`` check.
     """
     data = getattr(request, "data", None) or {}
-    headers = {k: v for k, v in data.items() if isinstance(k, str) and k.startswith("x-hcx-")}
+    headers = {
+        k: v for k, v in data.items() if isinstance(k, str) and k.startswith("x-hcx-")
+    }
 
     nhcx_status = headers.get("x-hcx-status") or ""
     correlation_id = headers.get("x-hcx-correlation_id") or ""
@@ -223,7 +233,14 @@ def _attach_error_to_anchor(
 ):
     """
     Mark the originating outbound request as failed so the UI can prompt
-    the user to retry. The full error detail lives on ``meta["last_error"]``;
+    the user to retry. Three places get touched on the anchor row:
+
+      * ``status``           -> "failed" (legacy banner trigger)
+      * ``meta["last_error"]`` -> full structured error block (audit)
+      * ``dispatch_error``     -> short text version for list/detail views;
+                                  read alongside ``dispatched_at`` to know
+                                  "we sent it at T, payer rejected with X".
+
     Task additionally gets an entry appended to ``output`` (FHIR-style
     audit trail).
 
@@ -240,6 +257,12 @@ def _attach_error_to_anchor(
         "received_at": timezone.now().isoformat(),
     }
 
+    dispatch_error_text = (
+        f"{error_block['code']}: {error_block['message']}".strip(": ")
+        if error_block["code"] or error_block["message"]
+        else f"NHCX {callback_type} error"
+    )
+
     for model in _ANCHOR_MODELS:
         try:
             instance = model.objects.filter(external_id=correlation_id).first()
@@ -253,8 +276,17 @@ def _attach_error_to_anchor(
         meta["last_error"] = error_block
         instance.meta = meta
         instance.status = _ANCHOR_FAILED_STATUS
+        instance.dispatch_error = dispatch_error_text[:8000]
+        if getattr(instance, "dispatched_at", None) is None:
+            instance.dispatched_at = timezone.now()
 
-        update_fields = ["status", "meta", "modified_date"]
+        update_fields = [
+            "status",
+            "meta",
+            "dispatch_error",
+            "dispatched_at",
+            "modified_date",
+        ]
         if hasattr(instance, "output") and isinstance(instance.output, list):
             instance.output = [*(instance.output or []), error_block]
             update_fields.append("output")

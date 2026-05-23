@@ -11,6 +11,7 @@ from nhcx.models.payment import PaymentReconciliation
 from nhcx.models.task import Task, TaskUseCaseChoices
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.payment import PaymentReconciliationRetrieveSpec
+from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -88,7 +89,7 @@ class PaymentViewSet(EMRBaseViewSet):
             workflow_id="",
         )
 
-        _response = GatewayService.payment_notice__on_request(encrypted_payload)
+        dispatch(task, GatewayService.payment_notice__on_request, encrypted_payload)
 
         return Response(
             PaymentReconciliationRetrieveSpec.serialize(

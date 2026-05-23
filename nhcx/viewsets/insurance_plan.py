@@ -44,6 +44,7 @@ from nhcx.specs.insurance_plan import (
     _attach_questionnaire_lookup,
     _detach_questionnaire_lookup,
 )
+from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -163,7 +164,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
             status="request.initiated",
             workflow_id="",
         )
-        GatewayService.insurance_plan__request(encrypted_payload)
+        dispatch(task, GatewayService.insurance_plan__request, encrypted_payload)
 
         return Response({"task_id": str(task.external_id)}, status=status.HTTP_200_OK)
 

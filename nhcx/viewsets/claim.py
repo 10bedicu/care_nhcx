@@ -25,6 +25,7 @@ from nhcx.specs.claim import (
     ClaimUseChoices,
 )
 from nhcx.specs.task import TaskListSpec, TaskRetrieveSpec
+from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -102,15 +103,17 @@ class ClaimViewSet(
         ).first()
         biometric_auth_token = biometric_auth.token if biometric_auth else None
 
-        _response = None
         if claim.use == ClaimUseChoices.CLAIM:
-            _response = GatewayService.claim__submit(encrypted_payload)
+            dispatch(claim, GatewayService.claim__submit, encrypted_payload)
         elif claim.use == ClaimUseChoices.PRE_AUTHORIZATION:
-            _response = GatewayService.pre_auth__submit(
-                encrypted_payload, biometric_auth_token
+            dispatch(
+                claim,
+                GatewayService.pre_auth__submit,
+                encrypted_payload,
+                biometric_auth_token,
             )
         elif claim.use == ClaimUseChoices.PRE_DETERMINATION:
-            _response = GatewayService.predetermination__submit(encrypted_payload)
+            dispatch(claim, GatewayService.predetermination__submit, encrypted_payload)
 
         return Response(
             ClaimRetrieveSpec.serialize(claim).model_dump(mode="json"),
@@ -207,7 +210,7 @@ class ClaimViewSet(
             workflow_id="",
         )
 
-        _response = GatewayService.task__submit(encrypted_payload)
+        dispatch(task, GatewayService.task__submit, encrypted_payload)
 
         return Response(
             TaskRetrieveSpec.serialize(task).model_dump(mode="json"),
@@ -282,7 +285,7 @@ class ClaimViewSet(
             workflow_id="",
         )
 
-        _response = GatewayService.task__submit(encrypted_payload)
+        dispatch(task, GatewayService.task__submit, encrypted_payload)
 
         return Response(
             TaskRetrieveSpec.serialize(task).model_dump(mode="json"),

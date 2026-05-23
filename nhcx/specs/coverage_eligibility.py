@@ -316,6 +316,9 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
     insurance: list[dict]
     item: list[dict]
 
+    dispatched_at: datetime | None = None
+    dispatch_error: str = ""
+
     provider: UUID4
     patient: UUID4
     encounter: UUID4 | None = None

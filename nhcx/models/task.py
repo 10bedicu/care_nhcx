@@ -44,3 +44,5 @@ class Task(EMRBaseModel):
     )
     focus_id = models.PositiveIntegerField(null=True, blank=True)
     focus = GenericForeignKey("focus_type", "focus_id")
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    dispatch_error = models.TextField(blank=True, default="")
