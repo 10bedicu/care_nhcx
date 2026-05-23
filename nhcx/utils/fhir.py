@@ -1283,7 +1283,7 @@ class Fhir:
                                 display=_dis_display,
                             )
                         ),
-                        valueAttachment=_discharge_summary_attachment,
+                        valueString="After treatment",  # TODO: fix the hard coding
                     )
                 ]
                 if _discharge_summary_attachment

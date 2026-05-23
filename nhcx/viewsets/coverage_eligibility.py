@@ -28,6 +28,10 @@ class CoverageEligibilityRequestFilter(filters.FilterSet):
     encounter = filters.UUIDFilter(field_name="encounter__external_id")
     patient = filters.UUIDFilter(field_name="patient__external_id")
     facility = filters.UUIDFilter(field_name="provider__facility__external_id")
+    purpose = filters.CharFilter(method="filter_purpose")
+
+    def filter_purpose(self, queryset, name, value):
+        return queryset.filter(purpose__contains=[value])
 
 
 class CoverageEligibilityRequestViewSet(
