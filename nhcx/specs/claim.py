@@ -201,42 +201,21 @@ class ClaimItemSpec(BaseModel):
     category: dict | None = None
     product_or_service: dict | None = None
     modifier: list[dict] = []
-    charge_item: UUID4 | None = None
+    charge_items: list[UUID4] = []
     program_code: list[dict] = []
     serviced_period: PeriodSpec
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
     factor: float | None = None
 
-    @field_validator("charge_item")
+    @field_validator("charge_items")
     @classmethod
-    def validate_charge_item(cls, value):
-        if value and not ChargeItem.objects.filter(external_id=value).exists():
-            raise ValidationError("Charge item not found")
+    def validate_charge_items(cls, value):
+        for uuid in value:
+            if not ChargeItem.objects.filter(external_id=uuid).exists():
+                msg = f"Charge item {uuid} not found"
+                raise ValidationError(msg)
         return value
-
-    @model_validator(mode="after")
-    def validate_charge_item_or_product_or_service(self):
-        if self.charge_item is None and self.product_or_service is None:
-            raise ValidationError(
-                "Either charge_item or product_or_service must be present"
-            )
-        if self.charge_item is not None and self.product_or_service is not None:
-            raise ValidationError(
-                "Only one of charge_item or product_or_service must be present"
-            )
-        if self.charge_item is not None:
-            charge_item = get_object_or_404(ChargeItem, external_id=self.charge_item)
-            if charge_item.code is None:
-                raise ValidationError("Charge item code is required")
-            self.product_or_service = charge_item.code
-            self.quantity = {
-                "value": charge_item.quantity,
-            }
-            for component in charge_item.unit_price_components:
-                if component.amount:
-                    self.unit_price += component.amount
-        return self
 
 
 class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
@@ -460,6 +439,14 @@ class ClaimCreateSpec(ClaimBaseSpec):
                 "supporting_info/questionnaire_responses",
             )
 
+        all_charge_item_uuids = [
+            str(uuid) for item in self.item for uuid in item.charge_items
+        ]
+        if len(all_charge_item_uuids) != len(set(all_charge_item_uuids)):
+            raise ValidationError(
+                "The same charge item cannot be linked to multiple items"
+            )
+
         return self
 
     @model_validator(mode="after")
@@ -662,11 +649,11 @@ class ClaimRetrieveSpec(ClaimListSpec):
             mapping["item"] = []
             for item in obj.item:
                 parsed = {**item}
-                if item.get("charge_item"):
-                    charge_item = ChargeItem.objects.get(
-                        external_id=item.get("charge_item")
-                    )
-                    parsed["charge_item"] = ChargeItemReadSpec.serialize(
-                        charge_item
-                    ).to_json()
+                if item.get("charge_items"):
+                    parsed["charge_items"] = [
+                        ChargeItemReadSpec.serialize(
+                            get_object_or_404(ChargeItem, external_id=uuid)
+                        ).to_json()
+                        for uuid in item.get("charge_items")
+                    ]
                 mapping["item"].append(parsed)
