@@ -5,6 +5,7 @@ from functools import wraps
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from abdm.utils.fhir.fhir import Fhir as AbdmFhir
 from django.db import models, transaction
 from django.db.models import Q, Value
 from django.db.models.functions import Replace
@@ -70,6 +71,7 @@ from care.emr.models.base import EMRBaseModel
 from care.emr.models.condition import Condition as ConditionModel
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.file_upload import FileUpload as FileUploadModel
+from care.emr.models.invoice import Invoice as InvoiceModel
 from care.emr.models.patient import Patient as PatientModel
 from care.emr.models.report.report_upload import ReportUpload as ReportUploadModel
 from care.emr.models.report.template import Template as ReportTemplate
@@ -1424,6 +1426,54 @@ class Fhir:
             ],
         )
 
+    _INPATIENT_ENCOUNTER_CLASSES = ("imp", "obsenc")
+
+    def _build_abdm_fhir_with_seeded_cache(self) -> tuple[AbdmFhir, set[str]]:
+        """
+        Spin up an AbdmFhir instance pre-seeded with the profiles & urn:uuid map
+        already built on this nhcx Fhir instance. abdm's @cache_profiles short-
+        circuits when a key exists, so any abdm helper that asks for the same
+        Patient/Practitioner/Organization/Encounter reuses nhcx's resource and
+        urn:uuid — no duplicate bundle entries.
+        """
+        abdm_fhir = AbdmFhir()
+        abdm_fhir._profiles = dict(self._profiles)  # noqa: SLF001
+        abdm_fhir._resource_id_url_map = dict(self._resource_id_url_map)  # noqa: SLF001
+        return abdm_fhir, set(self._profiles)
+
+    def _claim_supplementary_entries(self, claim: ClaimModel) -> list[BundleEntry]:
+        if claim.use != "claim" or not claim.encounter:
+            return []
+
+        abdm_fhir, seeded_keys = self._build_abdm_fhir_with_seeded_cache()
+        entries: list[BundleEntry] = []
+
+        for invoice in InvoiceModel.objects.filter(
+            account__primary_encounter=claim.encounter
+        ).select_related(
+            "patient", "facility", "account", "account__primary_encounter"
+        ):
+            composition = abdm_fhir._invoice_record_composition(  # noqa: SLF001
+                invoice, str(uuid4())
+            )
+            entries.append(abdm_fhir._bundle_entry(composition))  # noqa: SLF001
+
+        if claim.encounter.encounter_class in self._INPATIENT_ENCOUNTER_CLASSES:
+            composition = abdm_fhir._discharge_summary_composition(  # noqa: SLF001
+                claim.encounter, str(uuid4())
+            )
+        else:
+            composition = abdm_fhir._op_consult_composition(  # noqa: SLF001
+                claim.encounter, str(uuid4())
+            )
+        entries.append(abdm_fhir._bundle_entry(composition))  # noqa: SLF001
+
+        for key, profile in abdm_fhir._profiles.items():  # noqa: SLF001
+            if key not in seeded_keys and profile is not None:
+                entries.append(abdm_fhir._bundle_entry(profile))  # noqa: SLF001
+
+        return entries
+
     def create_claim_bundle(self, claim: ClaimModel):
         id = str(claim.external_id)
 
@@ -1441,6 +1491,7 @@ class Fhir:
             entry=[
                 self._bundle_entry(self._claim(claim)),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+                *self._claim_supplementary_entries(claim),
             ],
         )
 
