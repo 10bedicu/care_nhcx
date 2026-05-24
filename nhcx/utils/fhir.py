@@ -1687,17 +1687,18 @@ class Fhir:
                 "inforce": ins.get("inforce", False),
                 **coverage_fields,
                 "balance": None,
-                "procedure": None,
+                "items": [],
             }
 
             items = ins.get("item") or []
-            if items:
-                item = items[0]
+            for item in items:
                 benefits = item.get("benefit") or []
                 if any("usedMoney" in b for b in benefits):
                     entry["balance"] = Fhir._parse_item_balance(benefits)
                 else:
-                    entry["procedure"] = Fhir._parse_item_procedure(item, benefits)
+                    procedure = Fhir._parse_item_procedure(item, benefits)
+                    if procedure:
+                        entry["items"].append(procedure)
 
             entries.append(entry)
         return entries

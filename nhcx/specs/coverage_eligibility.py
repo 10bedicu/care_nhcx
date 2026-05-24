@@ -246,7 +246,7 @@ class RequiredQuestionnaireSpec(BaseModel):
     url: str
 
 
-class ProcedureSpec(BaseModel):
+class InsuranceEntryItemSpec(BaseModel):
     code: str
     display: str | None = None
     category: dict | None = None
@@ -272,7 +272,7 @@ class InsuranceEntrySpec(BaseModel):
     policy_period: PeriodSpec | None = None
 
     balance: BalanceSpec | None = None
-    procedure: ProcedureSpec | None = None
+    items: list[InsuranceEntryItemSpec] = []
 
 
 class CoverageEligibilityResponseRetrieveSpec(EMRResource):
