@@ -44,6 +44,7 @@ class TaskListSpec(TaskBaseSpec):
 
     dispatched_at: datetime | None = None
     dispatch_error: str = ""
+    dispatch_status: str = "pending"
 
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):

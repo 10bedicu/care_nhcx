@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet
+from nhcx.models import DispatchStatusChoices
 from nhcx.models.claim import Claim
 from nhcx.models.coverage_eligibility import CoverageEligibilityRequest
 from nhcx.models.inbound_envelope import (
@@ -277,6 +278,7 @@ def _attach_error_to_anchor(
         instance.meta = meta
         instance.status = _ANCHOR_FAILED_STATUS
         instance.dispatch_error = dispatch_error_text[:8000]
+        instance.dispatch_status = DispatchStatusChoices.ERROR
         if getattr(instance, "dispatched_at", None) is None:
             instance.dispatched_at = timezone.now()
 
@@ -284,6 +286,7 @@ def _attach_error_to_anchor(
             "status",
             "meta",
             "dispatch_error",
+            "dispatch_status",
             "dispatched_at",
             "modified_date",
         ]

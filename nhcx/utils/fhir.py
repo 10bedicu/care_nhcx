@@ -78,6 +78,7 @@ from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
 from care_nhcx.nhcx.specs.claim import ClaimStatusChoices
+from nhcx.models import DispatchStatusChoices
 from nhcx.models.claim import Claim as ClaimModel
 from nhcx.models.claim import ClaimResponse as ClaimResponseModel
 from nhcx.models.communication import Communication as CommunicationModel
@@ -1717,6 +1718,21 @@ class Fhir:
             )
         )
 
+        if coverage_eligibility_request_instance is not None:
+            outcome = coverage_eligibility_response.outcome or ""
+            if outcome == "partial":
+                coverage_eligibility_request_instance.dispatch_status = (
+                    DispatchStatusChoices.PARTIAL
+                )
+            elif outcome != "queued":
+                coverage_eligibility_request_instance.dispatch_status = (
+                    DispatchStatusChoices.COMPLETE
+                )
+            # "queued" leaves dispatch_status unchanged (stays AWAITING)
+            coverage_eligibility_request_instance.save(
+                update_fields=["dispatch_status", "modified_date"]
+            )
+
         return (
             coverage_eligibility_response_instance,
             coverage_eligibility_request_instance,
@@ -1760,6 +1776,21 @@ class Fhir:
                 "raw_headers": headers,
             },
         )
+
+        if claim_instance is not None:
+            # FHIR outcome "partial" means the payer gave a partial response
+            # and a further full response is still expected — map to our
+            # PARTIAL state so the UI can signal "awaiting full response".
+            # "queued" means the payer ack'd and is still processing — stays
+            # AWAITING (same as before the callback). Everything else
+            # (complete, error) is terminal — map to COMPLETE.
+            outcome = claim_response.outcome or ""
+            if outcome == "partial":
+                claim_instance.dispatch_status = DispatchStatusChoices.PARTIAL
+            elif outcome != "queued":
+                claim_instance.dispatch_status = DispatchStatusChoices.COMPLETE
+            # "queued" leaves dispatch_status unchanged (stays AWAITING)
+            claim_instance.save(update_fields=["dispatch_status", "modified_date"])
 
         return (claim_response_instance, claim_instance)
 
@@ -1946,7 +1977,10 @@ class Fhir:
         ).run()
 
         task.focus = insurance_plan_instance
-        task.save()
+        task.dispatch_status = DispatchStatusChoices.COMPLETE
+        task.save(
+            update_fields=["focus_type", "focus_id", "dispatch_status", "modified_date"]
+        )
 
         return (task, insurance_plan_instance)
 
@@ -2029,6 +2063,16 @@ class Fhir:
             task_instance.part_of = task_request
             task_instance.focus = claim_response_instance
             task_instance.save()
+
+            # The originating outbound Task received its payer response.
+            # Apply the same partial/queued/complete logic as for Claims.
+            task_response_outcome = claim_response.outcome or ""
+            if task_response_outcome == "partial":
+                task_request.dispatch_status = DispatchStatusChoices.PARTIAL
+            elif task_response_outcome != "queued":
+                task_request.dispatch_status = DispatchStatusChoices.COMPLETE
+            # "queued" leaves dispatch_status unchanged (stays AWAITING)
+            task_request.save(update_fields=["dispatch_status", "modified_date"])
 
             if task_instance.code.get("coding")[0].get("code") == "approve":
                 claim_instance.status = ClaimStatusChoices.CANCELLED

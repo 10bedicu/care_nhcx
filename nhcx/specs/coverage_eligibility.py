@@ -306,6 +306,7 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
 
     dispatched_at: datetime | None = None
     dispatch_error: str = ""
+    dispatch_status: str = "pending"
 
     provider: UUID4
     patient: UUID4

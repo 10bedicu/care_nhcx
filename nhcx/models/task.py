@@ -3,6 +3,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 from care.emr.models.base import EMRBaseModel
+from nhcx.models import DispatchStatusChoices
 
 
 class TaskUseCaseChoices(models.TextChoices):
@@ -46,3 +47,9 @@ class Task(EMRBaseModel):
     focus = GenericForeignKey("focus_type", "focus_id")
     dispatched_at = models.DateTimeField(null=True, blank=True)
     dispatch_error = models.TextField(blank=True, default="")
+    dispatch_status = models.CharField(
+        max_length=16,
+        choices=DispatchStatusChoices.choices,
+        default=DispatchStatusChoices.PENDING,
+        db_index=True,
+    )

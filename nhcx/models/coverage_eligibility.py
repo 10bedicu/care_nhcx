@@ -1,6 +1,7 @@
 from django.db import models
 
 from care.emr.models.base import EMRBaseModel
+from nhcx.models import DispatchStatusChoices
 
 
 class CoverageEligibilityRequest(EMRBaseModel):
@@ -22,6 +23,12 @@ class CoverageEligibilityRequest(EMRBaseModel):
     item = models.JSONField(default=list, null=True, blank=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     dispatch_error = models.TextField(blank=True, default="")
+    dispatch_status = models.CharField(
+        max_length=16,
+        choices=DispatchStatusChoices.choices,
+        default=DispatchStatusChoices.PENDING,
+        db_index=True,
+    )
 
 
 class CoverageEligibilityResponse(EMRBaseModel):
