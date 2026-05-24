@@ -67,6 +67,7 @@ from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.task import Task, TaskInput, TaskOutput
 from pydantic import UUID4, BaseModel
 
+from care.emr.models.account import Account as AccountModel
 from care.emr.models.base import EMRBaseModel
 from care.emr.models.condition import Condition as ConditionModel
 from care.emr.models.file_upload import FileUpload
@@ -76,6 +77,10 @@ from care.emr.models.patient import Patient as PatientModel
 from care.emr.models.report.report_upload import ReportUpload as ReportUploadModel
 from care.emr.models.report.template import Template as ReportTemplate
 from care.emr.reports.report_utils import generate_and_upload_report
+from care.emr.resources.account.spec import (
+    AccountBillingStatusOptions,
+    AccountStatusOptions,
+)
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
@@ -1448,15 +1453,30 @@ class Fhir:
         abdm_fhir, seeded_keys = self._build_abdm_fhir_with_seeded_cache()
         entries: list[BundleEntry] = []
 
-        for invoice in InvoiceModel.objects.filter(
-            account__primary_encounter=claim.encounter
-        ).select_related(
-            "patient", "facility", "account", "account__primary_encounter"
-        ):
-            composition = abdm_fhir._invoice_record_composition(  # noqa: SLF001
-                invoice, str(uuid4())
-            )
-            entries.append(abdm_fhir._bundle_entry(composition))  # noqa: SLF001
+        account = AccountModel.objects.filter(
+            patient=claim.patient,
+            facility=claim.encounter.facility,
+            primary_encounter=claim.encounter,
+        ).first()
+
+        if not account:
+            account = AccountModel.objects.filter(
+                patient=claim.patient,
+                facility=claim.encounter.facility,
+                status=AccountStatusOptions.active.value,
+                billing_status=AccountBillingStatusOptions.open.value,
+            ).first()
+
+        if account:
+            for invoice in InvoiceModel.objects.filter(
+                account=account,
+            ).select_related(
+                "patient", "facility", "account", "account__primary_encounter"
+            ):
+                composition = abdm_fhir._invoice_record_composition(  # noqa: SLF001
+                    invoice, str(uuid4())
+                )
+                entries.append(abdm_fhir._bundle_entry(composition))  # noqa: SLF001
 
         if claim.encounter.encounter_class in self._INPATIENT_ENCOUNTER_CLASSES:
             composition = abdm_fhir._discharge_summary_composition(  # noqa: SLF001
