@@ -14,6 +14,7 @@ from nhcx.specs.payment import PaymentReconciliationRetrieveSpec
 from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
+from nhcx.utils.workflow_codes import resolve_payment_acknowledge_workflow
 
 
 class PaymentViewSet(EMRBaseViewSet):
@@ -86,7 +87,7 @@ class PaymentViewSet(EMRBaseViewSet):
                 "x-hcx-correlation_id"
             ),
             status="response.complete",
-            workflow_id="",
+            workflow_id=resolve_payment_acknowledge_workflow().value,
         )
 
         dispatch(task, GatewayService.payment_notice__on_request, encrypted_payload)

@@ -28,6 +28,11 @@ from nhcx.specs.task import TaskListSpec, TaskRetrieveSpec
 from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
+from nhcx.utils.workflow_codes import (
+    resolve_cancel_workflow,
+    resolve_claim_submission_workflow,
+    resolve_reprocess_workflow,
+)
 
 
 class ClaimFilter(filters.FilterSet):
@@ -79,6 +84,8 @@ class ClaimViewSet(
     def submit(self, request, *args, **kwargs):
         claim = self.get_object()
 
+        workflow_code = resolve_claim_submission_workflow(claim)
+
         fhir_data = Fhir().create_claim_bundle(claim)
 
         with open("claim_submit.json", "w") as f:
@@ -93,7 +100,7 @@ class ClaimViewSet(
             patient_abha_number=claim.patient.abha_number.abha_number,
             correlation_id=str(claim.external_id),
             status="request.initiated",
-            workflow_id="15" if claim.use == ClaimUseChoices.CLAIM else "12",
+            workflow_id=workflow_code.value,
         )
 
         biometric_auth = MemberBiometricAuth.objects.filter(
@@ -147,6 +154,8 @@ class ClaimViewSet(
     @action(detail=True, methods=["POST"])
     def cancel(self, request, *args, **kwargs):
         claim = self.get_object()
+
+        workflow_code = resolve_cancel_workflow(claim)
 
         # TODO: add reason code to the body
 
@@ -207,7 +216,7 @@ class ClaimViewSet(
             patient_abha_number=claim.patient.abha_number.abha_number,
             correlation_id=str(task.external_id),
             status="request.initiated",
-            workflow_id="",
+            workflow_id=workflow_code.value,
         )
 
         dispatch(task, GatewayService.task__submit, encrypted_payload)
@@ -224,6 +233,8 @@ class ClaimViewSet(
     @action(detail=True, methods=["POST"])
     def reprocess(self, request, *args, **kwargs):
         claim = self.get_object()
+
+        workflow_code = resolve_reprocess_workflow(claim)
 
         # TODO: add reason code to the body
 
@@ -282,7 +293,7 @@ class ClaimViewSet(
             patient_abha_number=claim.patient.abha_number.abha_number,
             correlation_id=str(task.external_id),
             status="request.initiated",
-            workflow_id="",
+            workflow_id=workflow_code.value,
         )
 
         dispatch(task, GatewayService.task__submit, encrypted_payload)
