@@ -13,6 +13,7 @@ from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import Patient
 from care.emr.resources.base import EMRResource, PeriodSpec
 from care.emr.resources.charge_item.spec import ChargeItemReadSpec
+from care.emr.resources.common.coding import Coding
 from care.emr.resources.common.quantity import Quantity
 from care.emr.resources.condition.spec import ConditionReadSpec
 from care.emr.resources.encounter.spec import User
@@ -320,6 +321,38 @@ class ClaimAccidentSpec(BaseModel):
 class ClaimPayeeSpec(BaseModel):
     # TODO: add this after understanding field requirements
     pass
+
+class ClaimTaskActionRequestSpec(BaseModel):
+    """Optional body for claim cancel and reprocess task actions."""
+
+    reason_code: Coding | None = None
+    description: str | None = None
+
+
+def default_cancel_reason_code() -> Coding:
+    return Coding(
+        system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-reason-code",
+        code="treatmentplanchanged",
+        display="Treatment plan changed during hospitalization.",
+    )
+
+
+def default_reprocess_reason_code() -> Coding:
+    return Coding(
+        system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-reason-code",
+        code="claimrejected",
+        display="Reprocess request due to claim rejected by payer",
+    )
+
+
+def resolve_task_description(claim: Claim, description: str | None, action: str) -> str:
+    if description:
+        return description
+    claim_flow_id = (claim.meta or {}).get("claim_flow_id") or str(claim.external_id)
+    target_label = (
+        "preauth" if claim.use == ClaimUseChoices.PRE_AUTHORIZATION else "claim"
+    )
+    return f"{action} the {target_label} {claim_flow_id}"
 
 
 class ClaimBaseSpec(EMRResource):

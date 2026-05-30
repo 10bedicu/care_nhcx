@@ -22,7 +22,11 @@ from nhcx.specs.claim import (
     ClaimCreateSpec,
     ClaimListSpec,
     ClaimRetrieveSpec,
+    ClaimTaskActionRequestSpec,
     ClaimUseChoices,
+    default_cancel_reason_code,
+    default_reprocess_reason_code,
+    resolve_task_description,
 )
 from nhcx.specs.task import TaskListSpec, TaskRetrieveSpec
 from nhcx.utils.dispatch import dispatch
@@ -111,7 +115,12 @@ class ClaimViewSet(
         biometric_auth_token = biometric_auth.token if biometric_auth else None
 
         if claim.use == ClaimUseChoices.CLAIM:
-            dispatch(claim, GatewayService.claim__submit, encrypted_payload)
+            dispatch(
+                claim,
+                GatewayService.claim__submit,
+                encrypted_payload,
+                biometric_auth_token,
+            )
         elif claim.use == ClaimUseChoices.PRE_AUTHORIZATION:
             dispatch(
                 claim,
@@ -148,16 +157,23 @@ class ClaimViewSet(
         return Response(data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        request=None,
+        request=ClaimTaskActionRequestSpec,
         responses={200: TaskRetrieveSpec},
     )
     @action(detail=True, methods=["POST"])
     def cancel(self, request, *args, **kwargs):
         claim = self.get_object()
+        claim_flow_id = (claim.meta or {}).get("claim_flow_id") or str(
+            claim.external_id
+        )
 
         workflow_code = resolve_cancel_workflow(claim)
 
-        # TODO: add reason code to the body
+        body = ClaimTaskActionRequestSpec(
+            **(request.data if isinstance(request.data, dict) else {})
+        )
+        reason_code = body.reason_code or default_cancel_reason_code()
+        description = resolve_task_description(claim, body.description, "Cancel")
 
         task = Task.objects.create(
             status="requested",
@@ -172,7 +188,8 @@ class ClaimViewSet(
                 ]
             },
             authored_on=datetime.now(UTC),
-            description=f"Cancel the claim {claim.external_id}",
+            description=description,
+            reason_code={"coding": [reason_code.model_dump(mode="json")]},
             input=[
                 {
                     "type": {
@@ -183,7 +200,7 @@ class ClaimViewSet(
                             }
                         ]
                     },
-                    "valueString": str(claim.external_id),
+                    "valueString": claim_flow_id,
                 },
                 {
                     "type": {
@@ -194,7 +211,7 @@ class ClaimViewSet(
                             }
                         ]
                     },
-                    "valueString": str(claim.external_id),
+                    "valueString": claim_flow_id,
                 },
             ],
             output=[],
@@ -227,16 +244,23 @@ class ClaimViewSet(
         )
 
     @extend_schema(
-        request=None,
+        request=ClaimTaskActionRequestSpec,
         responses={200: TaskRetrieveSpec},
     )
     @action(detail=True, methods=["POST"])
     def reprocess(self, request, *args, **kwargs):
         claim = self.get_object()
+        claim_flow_id = (claim.meta or {}).get("claim_flow_id") or str(
+            claim.external_id
+        )
 
         workflow_code = resolve_reprocess_workflow(claim)
 
-        # TODO: add reason code to the body
+        body = ClaimTaskActionRequestSpec(
+            **(request.data if isinstance(request.data, dict) else {})
+        )
+        reason_code = body.reason_code or default_reprocess_reason_code()
+        description = resolve_task_description(claim, body.description, "Reprocess")
 
         task = Task.objects.create(
             status="requested",
@@ -251,16 +275,8 @@ class ClaimViewSet(
                 ]
             },
             authored_on=datetime.now(UTC),
-            description=f"Reprocess the claim {claim.external_id}",
-            reason_code={
-                "coding": [
-                    {
-                        "system": "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-reason-code",
-                        "code": "claimrejected",
-                        "display": "Reprocess request due to claim rejected by payer",
-                    }
-                ]
-            },
+            description=description,
+            reason_code={"coding": [reason_code.model_dump(mode="json")]},
             input=[
                 {
                     "type": {
@@ -271,7 +287,7 @@ class ClaimViewSet(
                             }
                         ]
                     },
-                    "valueString": str(claim.external_id),
+                    "valueString": claim_flow_id,
                 },
             ],
             output=[],
@@ -281,7 +297,7 @@ class ClaimViewSet(
 
         fhir_data = Fhir().create_task_bundle(task)
 
-        with open("claim_cancel_request.json", "w") as f:
+        with open("claim_reprocess_request.json", "w") as f:
             f.write(fhir_data.json())
 
         fhir_payload = json.loads(fhir_data.json())

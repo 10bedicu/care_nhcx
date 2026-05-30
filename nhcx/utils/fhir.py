@@ -84,7 +84,6 @@ from care.emr.resources.account.spec import (
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
-from care_nhcx.nhcx.specs.claim import ClaimStatusChoices
 from nhcx.models import DispatchStatusChoices
 from nhcx.models.claim import Claim as ClaimModel
 from nhcx.models.claim import ClaimResponse as ClaimResponseModel
@@ -101,6 +100,7 @@ from nhcx.models.task import Task as TaskModel
 from nhcx.models.task import TaskUseCaseChoices
 from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
+from nhcx.specs.claim import ClaimStatusChoices
 from nhcx.utils.insurance_plan_ingestor import InsurancePlanIngestor
 
 logger = logging.getLogger(__name__)
@@ -921,6 +921,7 @@ class Fhir:
 
     def _claim(self, claim: ClaimModel):
         id = str(claim.external_id)
+        flow_id = (claim.meta or {}).get("claim_flow_id") or id
 
         _all_si_seqs = [
             si.get("sequence", 0) for si in (claim.supporting_info or [])
@@ -1028,8 +1029,8 @@ class Fhir:
                             )
                         ]
                     ),
-                    system=f"urn:uuid:{id}",
-                    value=id,
+                    system=f"{CARE_IDENTIFIER_SYSTEM}/claim",
+                    value=flow_id,
                 )
             ],
             status=claim.status,
@@ -1291,10 +1292,36 @@ class Fhir:
                                 display=_dis_display,
                             )
                         ),
-                        valueString="After treatment",  # TODO: fix the hard coding
+                        valueString="After surgery",  # TODO: fix the hard coding
                     )
                 ]
                 if _discharge_summary_attachment
+                else []
+            )
+            + (
+                [
+                    ClaimSupportingInfo(
+                        sequence=_next_seq + 3,
+                        code=self._coding_to_codable_concept(
+                            CodingSpec(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                                code="ADDD",
+                                display="Admission Date",
+                            )
+                        ),
+                        category=self._coding_to_codable_concept(
+                            CodingSpec(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                                code="DSCHD",
+                                display="Discharge Date",
+                            )
+                        ),
+                        valueString=self._to_ist(
+                            datetime.now(UTC)
+                        ),  # TODO: default to now for now
+                    )
+                ]
+                if claim.use == "claim"
                 else []
             )
             or None,
@@ -1447,6 +1474,7 @@ class Fhir:
         return abdm_fhir, set(self._profiles)
 
     def _claim_supplementary_entries(self, claim: ClaimModel) -> list[BundleEntry]:
+        return []
         if claim.use != "claim" or not claim.encounter:
             return []
 
@@ -2056,39 +2084,69 @@ class Fhir:
 
         return (task, insurance_plan_instance)
 
-    def process_task_response(self, response: dict, headers: dict):
-        # FIXME: make this dynamic to handle cancel and reprocess responses
+    # Maps the originating outbound task use_case -> the response use_case we
+    # tag on the inbound Task. Anything not in this map falls back to a
+    # generic CANCEL_RESPONSE so we still record the row (old behaviour).
+    _RESPONSE_USE_CASE_MAP = {
+        TaskUseCaseChoices.CANCEL_REQUEST: TaskUseCaseChoices.CANCEL_RESPONSE,
+        TaskUseCaseChoices.REPROCESS_REQUEST: TaskUseCaseChoices.REPROCESS_RESPONSE,
+    }
 
+    @staticmethod
+    def _task_code(task_obj) -> str:
+        """Pull the primary task-code from a FHIR Task.code CodeableConcept dict."""
+        code = getattr(task_obj, "code", None) or {}
+        if not isinstance(code, dict):
+            return ""
+        coding = code.get("coding") or []
+        if not coding:
+            return ""
+        return (coding[0] or {}).get("code") or ""
+
+    @staticmethod
+    def _first_resource(bundle, resource_type: str) -> dict:
+        """
+        Return the first entry resource of ``resource_type`` from a FHIR Bundle.
+
+        Reprocess bundles carry an extra ``Claim`` resource alongside the
+        ``Task`` + ``ClaimResponse``; cancel bundles only carry the latter
+        two. Filtering by resourceType keeps both shapes working. Raises a
+        descriptive error instead of a bare StopIteration when absent.
+        """
+        for entry in bundle.entry or []:
+            resource = entry.get("resource") or {}
+            if resource.get("resourceType") == resource_type:
+                return resource
+        msg = f"{resource_type} resource not found in task response bundle"
+        raise Exception(msg)
+
+    def process_task_response(self, response: dict, headers: dict):
         # Using construct to avoid fhir validation errors
         task_response_bundle = Bundle.construct(**response)
 
+        # The gateway echoes our outbound NHCX correlation_id, which we set to
+        # the originating Task.external_id when submitting cancel/reprocess.
         task_request = TaskModel.objects.filter(
             external_id=headers.get("x-hcx-correlation_id")
         ).first()
         if not task_request:
             raise Exception("Correlation ID not found")
 
-        task = Task.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "Task",
-                    task_response_bundle.entry,
-                )
-            ).get("resource")
-        )
+        task = Task.construct(**self._first_resource(task_response_bundle, "Task"))
 
         claim_response = ClaimResponse.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "ClaimResponse",
-                    task_response_bundle.entry,
-                )
-            ).get("resource")
+            **self._first_resource(task_response_bundle, "ClaimResponse")
         )
 
         claim_instance = task_request.claim
+
+        # The response shape is identical for cancel and reprocess (Task +
+        # ClaimResponse); we differentiate by inspecting the originating
+        # outbound Task so the inbound row gets the right use_case and we
+        # don't blindly mutate claim.status for non-cancel flows.
+        response_use_case = self._RESPONSE_USE_CASE_MAP.get(
+            task_request.use_case, TaskUseCaseChoices.CANCEL_RESPONSE
+        )
 
         with transaction.atomic():
             # TODO: use TaskSpec to create the instance
@@ -2104,7 +2162,7 @@ class Fhir:
                 input=task.input,
                 output=task.output,
                 claim=claim_instance,
-                use_case=TaskUseCaseChoices.CANCEL_RESPONSE,
+                use_case=response_use_case,
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,
@@ -2146,8 +2204,18 @@ class Fhir:
             # "queued" leaves dispatch_status unchanged (stays AWAITING)
             task_request.save(update_fields=["dispatch_status", "modified_date"])
 
-            if task_instance.code.get("coding")[0].get("code") == "approve":
+            # Cascade onto the underlying claim only when the payer
+            # actually approved a cancel. A reprocess approval just yields
+            # a fresh ClaimResponse — the claim itself stays as-is.
+            # "reject"/other codes are recorded via the inbound Task +
+            # ClaimResponse but never flip claim.status from here.
+            inbound_task_code = self._task_code(task_instance)
+            if (
+                claim_instance is not None
+                and task_request.use_case == TaskUseCaseChoices.CANCEL_REQUEST
+                and inbound_task_code == "approve"
+            ):
                 claim_instance.status = ClaimStatusChoices.CANCELLED
-                claim_instance.save()
+                claim_instance.save(update_fields=["status", "modified_date"])
 
         return (task_instance, claim_response_instance, claim_instance)

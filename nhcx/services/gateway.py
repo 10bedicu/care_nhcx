@@ -115,13 +115,16 @@ class GatewayService:
         return response.json()
 
     @staticmethod
-    def claim__submit(payload: str) -> dict:
+    def claim__submit(payload: str, biometric_auth_token: str | None = None) -> dict:
         path = "/v1/claim/submit"
 
         response = GatewayService.request.post(
             path,
             {"payload": payload},
-            headers=GatewayService.headers(),
+            headers={
+                **GatewayService.headers(),
+                "X-User-Token": biometric_auth_token,
+            },
         )
 
         if response.status_code != status.HTTP_202_ACCEPTED:
