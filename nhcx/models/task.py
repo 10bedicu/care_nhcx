@@ -3,6 +3,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 from care.emr.models.base import EMRBaseModel
+from nhcx.models import DispatchStatusChoices
 
 
 class TaskUseCaseChoices(models.TextChoices):
@@ -12,6 +13,8 @@ class TaskUseCaseChoices(models.TextChoices):
     PAYMENT_NOTICE_RESPONSE = "payment_notice_response", "Payment Notice Response"
     REPROCESS_REQUEST = "reprocess_request", "Reprocess Request"
     REPROCESS_RESPONSE = "reprocess_response", "Reprocess Response"
+    CANCEL_REQUEST = "cancel_request", "Cancel Request"
+    CANCEL_RESPONSE = "cancel_response", "Cancel Response"
     SEARCH_REQUEST = "search_request", "Search Request"
     SEARCH_RESPONSE = "search_response", "Search Response"
     INSURANCE_PLAN_REQUEST = "insurance_plan_request", "Insurance Plan Request"
@@ -42,3 +45,11 @@ class Task(EMRBaseModel):
     )
     focus_id = models.PositiveIntegerField(null=True, blank=True)
     focus = GenericForeignKey("focus_type", "focus_id")
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    dispatch_error = models.TextField(blank=True, default="")
+    dispatch_status = models.CharField(
+        max_length=16,
+        choices=DispatchStatusChoices.choices,
+        default=DispatchStatusChoices.PENDING,
+        db_index=True,
+    )

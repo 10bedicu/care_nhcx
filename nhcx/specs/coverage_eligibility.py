@@ -10,7 +10,7 @@ from care.emr.models.condition import Condition
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import Patient
-from care.emr.resources.base import EMRResource
+from care.emr.resources.base import EMRResource, PeriodSpec
 from care.emr.resources.charge_item.spec import ChargeItemReadSpec
 from care.emr.resources.common.quantity import Quantity
 from care.emr.resources.condition.spec import ConditionReadSpec
@@ -25,9 +25,7 @@ from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
 from nhcx.specs.valuesets.coverage_eligibility import (
-    NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET,
     NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_DIAGNOSIS_CODE_VALUESET,
-    NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
 
@@ -117,50 +115,24 @@ class CoverageEligibilityRequestItemDiagnosisSpec(BaseModel):
 
 
 class CoverageEligibilityRequestItemSpec(BaseModel):
+    sequence: int
     supporting_info_sequence: list[int] = []
-    category: ValueSetBoundCoding[
-        NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_CATEGORY_VALUESET.slug
-    ]
-    product_or_service: (
-        ValueSetBoundCoding[
-            NHCX_COVERAGE_ELIGIBILITY_REQUEST_PRODUCT_OR_SERVICE_VALUESET.slug
-        ]
-        | None
-    ) = None
-    charge_item: UUID4 | None = None
+    category: dict | None = None
+    product_or_service: dict | None = None
+    modifier: list[dict] = []
+    charge_items: list[UUID4] = []
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
     diagnosis: list[CoverageEligibilityRequestItemDiagnosisSpec] = []
 
-    @field_validator("charge_item")
+    @field_validator("charge_items")
     @classmethod
-    def validate_charge_item(cls, value):
-        if value and not ChargeItem.objects.filter(external_id=value).exists():
-            raise ValidationError("Charge item not found")
+    def validate_charge_items(cls, value):
+        for uuid in value:
+            if not ChargeItem.objects.filter(external_id=uuid).exists():
+                msg = f"Charge item {uuid} not found"
+                raise ValidationError(msg)
         return value
-
-    @model_validator(mode="after")
-    def validate_charge_item_or_product_or_service(self):
-        if self.charge_item is None and self.product_or_service is None:
-            raise ValidationError(
-                "Either charge_item or product_or_service must be present"
-            )
-        if self.charge_item is not None and self.product_or_service is not None:
-            raise ValidationError(
-                "Only one of charge_item or product_or_service must be present"
-            )
-        if self.charge_item is not None:
-            charge_item = get_object_or_404(ChargeItem, external_id=self.charge_item)
-            if charge_item.code is None:
-                raise ValidationError("Charge item code is required")
-            self.product_or_service = charge_item.code
-            self.quantity = {
-                "value": charge_item.quantity,
-            }
-            for component in charge_item.unit_price_components:
-                if component.amount:
-                    self.unit_price += component.amount
-        return self
 
 
 class CoverageEligibilityRequestBaseSpec(EMRResource):
@@ -207,6 +179,34 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
             raise ValidationError("Provider not found")
         return value
 
+    @model_validator(mode="after")
+    def validate_sequences(self):
+        def _check_unique(items, field, label):
+            seqs = [getattr(i, field) for i in items]
+            if len(seqs) != len(set(seqs)):
+                msg = f"Duplicate sequences in {label}"
+                raise ValidationError(msg)
+
+        _check_unique(self.supporting_info, "sequence", "supporting_info")
+        _check_unique(self.item, "sequence", "item")
+
+        valid_info_seqs = {s.sequence for s in self.supporting_info}
+        for item in self.item:
+            invalid = set(item.supporting_info_sequence) - valid_info_seqs
+            if invalid:
+                msg = f"item.supporting_info_sequence references unknown supporting_info sequences: {sorted(invalid)}"
+                raise ValidationError(msg)
+
+        all_charge_item_uuids = [
+            str(uuid) for item in self.item for uuid in item.charge_items
+        ]
+        if len(all_charge_item_uuids) != len(set(all_charge_item_uuids)):
+            raise ValidationError(
+                "The same charge item cannot be linked to multiple items"
+            )
+
+        return self
+
     def perform_extra_deserialization(self, is_update, obj):
         if self.encounter:
             obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
@@ -217,7 +217,7 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1000003538@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
+                    participant_code="1518@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
@@ -225,13 +225,63 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
             raise ValidationError(e.detail) from e
 
 
+class MoneySpec(BaseModel):
+    value: float
+    currency: str = "INR"
+
+
+class BalanceSpec(BaseModel):
+    allowed: MoneySpec
+    used: MoneySpec
+
+
+class RequiredDocumentSpec(BaseModel):
+    code: str
+    display: str
+
+
+class RequiredQuestionnaireSpec(BaseModel):
+    id: str
+    display: str
+    url: str
+
+
+class InsuranceEntryItemSpec(BaseModel):
+    code: str
+    display: str | None = None
+    category: dict | None = None
+    excluded: bool = False
+    allowed_amount: MoneySpec | None = None
+    authorization_required: bool = False
+    required_documents: list[RequiredDocumentSpec] = []
+    required_questionnaires: list[RequiredQuestionnaireSpec] = []
+
+
+class InsuranceEntrySpec(BaseModel):
+    pmjay_id: str
+    is_primary: bool = False
+
+    name: str | None = None
+    dob: str | None = None
+    gender: str | None = None
+    abha_id: str | None = None
+
+    inforce: bool = False
+    plan_name: str | None = None
+    plan_id: str | None = None
+    policy_period: PeriodSpec | None = None
+
+    balance: BalanceSpec | None = None
+    items: list[InsuranceEntryItemSpec] = []
+
+
 class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     __model__ = CoverageEligibilityResponse
-    __exclude__ = ["request"]
+    __exclude__ = ["request", "insurance"]
 
     outcome: str
     disposition: str | None = None
-    insurance: dict | None = None
+    insurances: list[InsuranceEntrySpec] | None = None
     error: dict | None = None
     request: UUID4
 
@@ -242,6 +292,7 @@ class CoverageEligibilityResponseRetrieveSpec(EMRResource):
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
         mapping["request"] = obj.request.external_id
+        mapping["insurances"] = obj.insurance
 
 
 class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
@@ -252,6 +303,10 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
     supporting_info: list[dict]
     insurance: list[dict]
     item: list[dict]
+
+    dispatched_at: datetime | None = None
+    dispatch_error: str = ""
+    dispatch_status: str = "pending"
 
     provider: UUID4
     patient: UUID4
@@ -288,7 +343,6 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
 
 
 class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestListSpec):
-
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         super().perform_extra_serialization(mapping, obj)
@@ -309,27 +363,27 @@ class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestListSpec)
         if obj.item:
             mapping["item"] = []
             for item in obj.item:
-                parsed = {**item}
-                if item.get("charge_item"):
-                    charge_item = get_object_or_404(
-                        ChargeItem, external_id=item.get("charge_item")
-                    )
-                    parsed["charge_item"] = ChargeItemReadSpec.serialize(
-                        charge_item
-                    ).to_json()
+                parsed_item = {**item}
+                if item.get("charge_items"):
+                    parsed_item["charge_items"] = [
+                        ChargeItemReadSpec.serialize(
+                            get_object_or_404(ChargeItem, external_id=uuid)
+                        ).to_json()
+                        for uuid in item.get("charge_items")
+                    ]
 
                 if item.get("diagnosis"):
-                    mapping["diagnosis"] = []
+                    parsed_item["diagnosis"] = []
                     for diagnosis in item.get("diagnosis"):
-                        parsed = {**diagnosis}
+                        parsed_diagnosis = {**diagnosis}
                         if diagnosis.get("diagnosis_reference"):
                             condition = get_object_or_404(
                                 Condition,
                                 external_id=diagnosis.get("diagnosis_reference"),
                             )
-                            parsed["diagnosis_reference"] = ConditionReadSpec.serialize(
-                                condition
-                            ).to_json()
-                        mapping["diagnosis"].append(parsed)
+                            parsed_diagnosis["diagnosis_reference"] = (
+                                ConditionReadSpec.serialize(condition).to_json()
+                            )
+                        parsed_item["diagnosis"].append(parsed_diagnosis)
 
-                mapping["item"].append(parsed)
+                mapping["item"].append(parsed_item)

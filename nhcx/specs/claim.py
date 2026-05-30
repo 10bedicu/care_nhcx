@@ -20,6 +20,7 @@ from care.emr.resources.file_upload.spec import FileUploadRetrieveSpec
 from care.emr.resources.user.spec import UserSpec
 from care.emr.utils.valueset_coding_type import ValueSetBoundCoding
 from nhcx.models.claim import Claim, ClaimResponse
+from nhcx.models.insurance_plan import InsurancePlanQuestionnaire
 from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
@@ -27,12 +28,9 @@ from nhcx.specs.valuesets.claim import (
     NHCX_CLAIM_CARE_TEAM_ROLE_VALUESET,
     NHCX_CLAIM_DIAGNOSIS_CODE_VALUESET,
     NHCX_CLAIM_DIAGNOSIS_TYPE_VALUESET,
-    NHCX_CLAIM_ITEM_CATEGORY_VALUESET,
     NHCX_CLAIM_PROCEDURE_CODE_VALUESET,
     NHCX_CLAIM_PROCEDURE_TYPE_VALUESET,
-    NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET,
     NHCX_CLAIM_RELATED_RELATIONSHIP_VALUESET,
-    NHCX_CLAIM_TYPE_VALUESET,
 )
 from nhcx.utils.exceptions import NHCXAPIException
 
@@ -200,46 +198,117 @@ class ClaimItemSpec(BaseModel):
     diagnosis_sequence: list[int] = []
     procedure_sequence: list[int] = []
     information_sequence: list[int] = []
-    category: ValueSetBoundCoding[NHCX_CLAIM_ITEM_CATEGORY_VALUESET.slug] | None = None
-    product_or_service: (
-        ValueSetBoundCoding[NHCX_CLAIM_PRODUCT_OR_SERVICE_VALUESET.slug] | None
-    ) = None
-    charge_item: UUID4 | None = None
+    category: dict | None = None
+    product_or_service: dict | None = None
+    modifier: list[dict] = []
+    charge_items: list[UUID4] = []
     program_code: list[dict] = []
-    serviced_period: PeriodSpec | None = None
+    serviced_period: PeriodSpec
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
     factor: float | None = None
 
-    @field_validator("charge_item")
+    @field_validator("charge_items")
     @classmethod
-    def validate_charge_item(cls, value):
-        if value and not ChargeItem.objects.filter(external_id=value).exists():
-            raise ValidationError("Charge item not found")
+    def validate_charge_items(cls, value):
+        for uuid in value:
+            if not ChargeItem.objects.filter(external_id=uuid).exists():
+                msg = f"Charge item {uuid} not found"
+                raise ValidationError(msg)
         return value
 
+
+class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
+    value_boolean: bool | None = None
+    value_decimal: float | None = None
+    value_integer: int | None = None
+    value_date: str | None = None
+    value_date_time: str | None = None
+    value_time: str | None = None
+    value_string: str | None = None
+    value_uri: str | None = None
+    value_attachment: UUID4 | None = None
+    value_coding: dict | None = None
+    value_quantity: dict | None = None
+
     @model_validator(mode="after")
-    def validate_charge_item_or_product_or_service(self):
-        if self.charge_item is None and self.product_or_service is None:
-            raise ValidationError(
-                "Either charge_item or product_or_service must be present"
-            )
-        if self.charge_item is not None and self.product_or_service is not None:
-            raise ValidationError(
-                "Only one of charge_item or product_or_service must be present"
-            )
-        if self.charge_item is not None:
-            charge_item = get_object_or_404(ChargeItem, external_id=self.charge_item)
-            if charge_item.code is None:
-                raise ValidationError("Charge item code is required")
-            self.product_or_service = charge_item.code
-            self.quantity = {
-                "value": charge_item.quantity,
-            }
-            for component in charge_item.unit_price_components:
-                if component.amount:
-                    self.unit_price += component.amount
+    def validate_at_most_one_value(self):
+        values = [
+            self.value_boolean,
+            self.value_decimal,
+            self.value_integer,
+            self.value_date,
+            self.value_date_time,
+            self.value_time,
+            self.value_string,
+            self.value_uri,
+            self.value_attachment,
+            self.value_coding,
+            self.value_quantity,
+        ]
+        non_null = [v for v in values if v is not None]
+        if len(non_null) > 1:
+            raise ValidationError("At most one value field may be set on each answer")
         return self
+
+    @field_validator("value_attachment")
+    @classmethod
+    def validate_value_attachment(cls, value):
+        if value and not FileUpload.objects.filter(external_id=value).exists():
+            raise ValidationError("File upload not found")
+        return value
+
+
+class ClaimQuestionnaireResponseItemSpec(BaseModel):
+    link_id: str
+    text: str | None = None
+    answer: list[ClaimQuestionnaireResponseAnswerSpec] = []
+    item: list["ClaimQuestionnaireResponseItemSpec"] = []
+
+
+ClaimQuestionnaireResponseItemSpec.model_rebuild()
+
+
+class ClaimQuestionnaireResponseSpec(BaseModel):
+    """
+    Questionnaire responses filled during claim entry, keyed by the
+    InsurancePlanQuestionnaire.full_url that the answers belong to.
+
+    `sequence` must be globally unique across all supportingInfo entries on
+    the claim (i.e. must not overlap with any sequence in supporting_info).
+    Convention: set it to max(supporting_info sequences) + qr_index + 1.
+
+    `category` and `code` map to the supportingInfo entry that references
+    this response in the FHIR bundle.
+    """
+
+    sequence: int
+    questionnaire: str  # InsurancePlanQuestionnaire.full_url (e.g. urn:uuid:...)
+    category: dict
+    code: dict
+    item: list[ClaimQuestionnaireResponseItemSpec] = []
+
+
+def _collect_required_link_ids(fhir_items: list) -> set[str]:
+    """Recursively collect linkIds that are marked required=True in a FHIR Questionnaire items list."""
+    required: set[str] = set()
+    for item in fhir_items or []:
+        if item.get("required", False):
+            link_id = item.get("linkId") or item.get("link_id")
+            if link_id:
+                required.add(link_id)
+        required.update(_collect_required_link_ids(item.get("item") or []))
+    return required
+
+
+def _collect_answered_link_ids(response_items) -> set[str]:
+    """Recursively collect linkIds that have at least one answer in a QuestionnaireResponse items list."""
+    answered: set[str] = set()
+    for item in response_items or []:
+        if item.answer:
+            answered.add(item.link_id)
+        answered.update(_collect_answered_link_ids(item.item))
+    return answered
 
 
 class ClaimAccidentSpec(BaseModel):
@@ -269,7 +338,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
     use: ClaimUseChoices
     status: ClaimStatusChoices
     priority: ClaimPriorityChoices
-    type: ValueSetBoundCoding[NHCX_CLAIM_TYPE_VALUESET.slug]
+    type: dict
     facility: UUID4
     patient: UUID4
     encounter: UUID4 | None = None
@@ -283,6 +352,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
     item: list[ClaimItemSpec] = Field([], min_length=1)
     accident: ClaimAccidentSpec | None = None
     payee: ClaimPayeeSpec | None = None
+    questionnaire_responses: list[ClaimQuestionnaireResponseSpec] = []
 
     @field_validator("encounter")
     @classmethod
@@ -308,6 +378,103 @@ class ClaimCreateSpec(ClaimBaseSpec):
             raise ValidationError("Provider not found")
         return value
 
+    @model_validator(mode="after")
+    def validate_sequences(self):
+        def _check_unique(items, field, label):
+            seqs = [getattr(i, field) for i in items]
+            if len(seqs) != len(set(seqs)):
+                msg = f"Duplicate sequences in {label}"
+                raise ValidationError(msg)
+
+        def _check_refs(refs, valid_seqs, ref_label, target_label):
+            invalid = set(refs) - valid_seqs
+            if invalid:
+                msg = f"{ref_label} references unknown {target_label} sequences: {sorted(invalid)}"
+                raise ValidationError(msg)
+
+        _check_unique(self.care_team, "sequence", "care_team")
+        _check_unique(self.diagnosis, "sequence", "diagnosis")
+        _check_unique(self.procedure, "sequence", "procedure")
+        _check_unique(self.insurance, "sequence", "insurance")
+        _check_unique(self.item, "sequence", "item")
+
+        # supporting_info and questionnaire_responses both contribute to
+        # FHIR Claim.supportingInfo — their sequences must be unique together
+        supporting_seqs = [s.sequence for s in self.supporting_info]
+        qr_seqs = [q.sequence for q in self.questionnaire_responses]
+        all_info_seqs = supporting_seqs + qr_seqs
+        if len(all_info_seqs) != len(set(all_info_seqs)):
+            raise ValidationError(
+                "Duplicate sequences across supporting_info and questionnaire_responses"
+            )
+
+        valid_care_team_seqs = {ct.sequence for ct in self.care_team}
+        valid_diagnosis_seqs = {d.sequence for d in self.diagnosis}
+        valid_procedure_seqs = {p.sequence for p in self.procedure}
+        valid_info_seqs = set(all_info_seqs)
+
+        for item in self.item:
+            _check_refs(
+                item.care_team_sequence,
+                valid_care_team_seqs,
+                "item.care_team_sequence",
+                "care_team",
+            )
+            _check_refs(
+                item.diagnosis_sequence,
+                valid_diagnosis_seqs,
+                "item.diagnosis_sequence",
+                "diagnosis",
+            )
+            _check_refs(
+                item.procedure_sequence,
+                valid_procedure_seqs,
+                "item.procedure_sequence",
+                "procedure",
+            )
+            _check_refs(
+                item.information_sequence,
+                valid_info_seqs,
+                "item.information_sequence",
+                "supporting_info/questionnaire_responses",
+            )
+
+        all_charge_item_uuids = [
+            str(uuid) for item in self.item for uuid in item.charge_items
+        ]
+        if len(all_charge_item_uuids) != len(set(all_charge_item_uuids)):
+            raise ValidationError(
+                "The same charge item cannot be linked to multiple items"
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_questionnaire_responses_content(self):
+        for qr in self.questionnaire_responses:
+            questionnaire = (
+                InsurancePlanQuestionnaire.objects.filter(
+                    full_url=qr.questionnaire
+                ).first()
+                or InsurancePlanQuestionnaire.objects.filter(
+                    url=qr.questionnaire
+                ).first()
+            )
+            if not questionnaire or not questionnaire.items:
+                continue
+
+            required_link_ids = _collect_required_link_ids(questionnaire.items)
+            if not required_link_ids:
+                continue
+
+            answered_link_ids = _collect_answered_link_ids(qr.item)
+            missing = required_link_ids - answered_link_ids
+            if missing:
+                msg = f"Required questionnaire items missing for '{qr.questionnaire}': {sorted(missing)}"
+                raise ValidationError(msg)
+
+        return self
+
     def perform_extra_deserialization(self, is_update, obj):
         if self.encounter:
             obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
@@ -318,7 +485,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1000003538@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
+                    participant_code="1518@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
@@ -345,12 +512,22 @@ class ClaimResponseRetrieveSpec(EMRResource):
     __model__ = ClaimResponse
     __exclude__ = ["request"]
 
+    use: str | None = None
+    status: str | None = None
     outcome: str
     disposition: str | None = None
-    item: dict | None = None
-    add_item: dict | None = None
-    total: dict | None = None
-    error: dict | None = None
+    # Payer-assigned pre-authorization number — only present on pre-auth approvals.
+    # Must be included when submitting the final claim.
+    pre_auth_ref: str | None = None
+    # Claim-level adjudication list; carries the machine-readable status code
+    # (approved / queried / rejected) as opposed to the FHIR outcome enum.
+    adjudication: list | None = None
+    identifier: list | None = None
+    type: dict | None = None
+    item: list | None = None
+    add_item: list | None = None
+    total: list | None = None
+    error: list | None = None
     request: UUID4
 
     created_date: datetime | None = None
@@ -378,6 +555,11 @@ class ClaimListSpec(ClaimBaseSpec):
     item: list[dict] = []
     accident: dict | None = None
     payee: dict | None = None
+    questionnaire_responses: list[dict] = []
+
+    dispatched_at: datetime | None = None
+    dispatch_error: str = ""
+    dispatch_status: str = "pending"
 
     provider: UUID4
     patient: UUID4
@@ -468,11 +650,11 @@ class ClaimRetrieveSpec(ClaimListSpec):
             mapping["item"] = []
             for item in obj.item:
                 parsed = {**item}
-                if item.get("charge_item"):
-                    charge_item = ChargeItem.objects.get(
-                        external_id=item.get("charge_item")
-                    )
-                    parsed["charge_item"] = ChargeItemReadSpec.serialize(
-                        charge_item
-                    ).to_json()
+                if item.get("charge_items"):
+                    parsed["charge_items"] = [
+                        ChargeItemReadSpec.serialize(
+                            get_object_or_404(ChargeItem, external_id=uuid)
+                        ).to_json()
+                        for uuid in item.get("charge_items")
+                    ]
                 mapping["item"].append(parsed)

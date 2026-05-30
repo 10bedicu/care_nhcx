@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Literal, TypedDict
 from uuid import uuid4
 
+from django.db.models import Q
 from jwcrypto import jwe, jwk
 
 from nhcx.models.provider import Provider
@@ -113,7 +114,10 @@ class NHCX:
         if not isinstance(data, str):
             raise NHCXInternalException("Data to be decrypted must be a string")
 
-        provider = Provider.objects.filter(participant_code=recipient_code).first()
+        provider = Provider.objects.filter(
+            Q(participant_code=recipient_code)
+            | Q(participant_code=recipient_code + "@hcx")
+        ).first()
         private_key = provider.encryption_private_key if provider else None
 
         if not private_key:

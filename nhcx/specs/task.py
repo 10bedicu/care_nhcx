@@ -42,6 +42,10 @@ class TaskListSpec(TaskBaseSpec):
     part_of: UUID4 | None = None
     focus: UUID4 | None = None
 
+    dispatched_at: datetime | None = None
+    dispatch_error: str = ""
+    dispatch_status: str = "pending"
+
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id

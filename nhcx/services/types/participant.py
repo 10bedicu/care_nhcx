@@ -9,6 +9,11 @@ class GetPoliciesBody(BaseModel):
     identifiervalue: str
 
 
+class PolicyPeriod(BaseModel):
+    start: str | None = None
+    end: str | None = None
+
+
 class Policy(BaseModel):
     sno: str
     abhanumber: str
@@ -18,6 +23,7 @@ class Policy(BaseModel):
     productid: str
     productname: str
     processingid: str
+    policy_period: PolicyPeriod | None = None
 
 
 class GetPoliciesResponse(RootModel[list[Policy]]):
@@ -42,7 +48,7 @@ class Participant(BaseModel):
     signing_cert_path: str | None
     encryption_cert: str
     endpoint_url: str
-    registry_id: str
+    registry_id: str | None
     state: str
     district: str | None
     authentication_applicable: Literal["Y", "N"]

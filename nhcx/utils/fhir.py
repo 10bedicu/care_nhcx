@@ -1,8 +1,11 @@
 import base64
+import logging
 from datetime import UTC, datetime
 from functools import wraps
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
+from abdm.utils.fhir.fhir import Fhir as AbdmFhir
 from django.db import models, transaction
 from django.db.models import Q, Value
 from django.db.models.functions import Replace
@@ -45,7 +48,6 @@ from fhir.resources.R4B.documentreference import (
 )
 from fhir.resources.R4B.humanname import HumanName
 from fhir.resources.R4B.identifier import Identifier
-from fhir.resources.R4B.insuranceplan import InsurancePlan
 from fhir.resources.R4B.location import Location
 from fhir.resources.R4B.meta import Meta
 from fhir.resources.R4B.money import Money
@@ -55,19 +57,35 @@ from fhir.resources.R4B.paymentreconciliation import PaymentReconciliation
 from fhir.resources.R4B.period import Period
 from fhir.resources.R4B.practitioner import Practitioner
 from fhir.resources.R4B.quantity import Quantity
+from fhir.resources.R4B.questionnaireresponse import (
+    QuestionnaireResponse,
+    QuestionnaireResponseItem,
+    QuestionnaireResponseItemAnswer,
+)
 from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.task import Task, TaskInput, TaskOutput
 from pydantic import UUID4, BaseModel
 
+from care.emr.models.account import Account as AccountModel
 from care.emr.models.base import EMRBaseModel
 from care.emr.models.condition import Condition as ConditionModel
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.file_upload import FileUpload as FileUploadModel
+from care.emr.models.invoice import Invoice as InvoiceModel
 from care.emr.models.patient import Patient as PatientModel
+from care.emr.models.report.report_upload import ReportUpload as ReportUploadModel
+from care.emr.models.report.template import Template as ReportTemplate
+from care.emr.reports.report_utils import generate_and_upload_report
+from care.emr.resources.account.spec import (
+    AccountBillingStatusOptions,
+    AccountStatusOptions,
+)
 from care.emr.resources.common.coding import Coding as CodingSpec
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
+from care_nhcx.nhcx.specs.claim import ClaimStatusChoices
+from nhcx.models import DispatchStatusChoices
 from nhcx.models.claim import Claim as ClaimModel
 from nhcx.models.claim import ClaimResponse as ClaimResponseModel
 from nhcx.models.communication import Communication as CommunicationModel
@@ -78,23 +96,58 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
-from nhcx.models.insurance_plan import InsurancePlan as InsurancePlanModel
 from nhcx.models.payment import PaymentReconciliation as PaymentReconciliationModel
 from nhcx.models.task import Task as TaskModel
 from nhcx.models.task import TaskUseCaseChoices
 from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
+from nhcx.utils.insurance_plan_ingestor import InsurancePlanIngestor
+
+logger = logging.getLogger(__name__)
 
 CARE_IDENTIFIER_SYSTEM = settings.BACKEND_DOMAIN
 
+# Maps CARE DischargeDispositionChoices values → (NDHM code, display) for
+# Claim.supportingInfo[category=DIS] entries.
+_DISCHARGE_DISPOSITION_NDHM_MAP: dict[str, tuple[str, str]] = {
+    "home": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "alt_home": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "aadvice": ("LAMA", "Left Against Medical Advice"),
+    "exp": ("DTM", "DischargeToMortuary (Discharge disposition status)"),
+    "other_hcf": ("DAMA", "Discharged Against Medical Advice"),
+    "hosp": ("DAMA", "Discharged Against Medical Advice"),
+    "long": ("DAMA", "Discharged Against Medical Advice"),
+    "psy": ("DAMA", "Discharged Against Medical Advice"),
+    "rehab": ("DAMA", "Discharged Against Medical Advice"),
+    "snf": ("DAMA", "Discharged Against Medical Advice"),
+    "oth": ("DAMA", "Discharged Against Medical Advice"),
+}
+
 
 class Fhir:
+    _IST = ZoneInfo("Asia/Kolkata")
+
     def __init__(self):
         self._profiles = {}
         self._resource_id_url_map = {}
 
         self._participants_external_id_map = {}
         self._policies_external_id_map = {}
+
+    @classmethod
+    def _to_ist(cls, dt: datetime) -> str:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(cls._IST).replace(microsecond=0).isoformat()
+
+    @classmethod
+    def _ist_period(cls, start: str | None, end: str | None) -> Period | None:
+        if not start and not end:
+            return None
+        return Period(
+            start=cls._to_ist(datetime.fromisoformat(start)) if start else None,
+            end=cls._to_ist(datetime.fromisoformat(end)) if end else None,
+        )
 
     @staticmethod
     def cache_profiles(resource_type: str):
@@ -151,7 +204,33 @@ class Fhir:
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient"],
             ),
             identifier=[
-                # FIXME: add abha number
+                # FIXME: remove this once we have a real identifier
+                Identifier(
+                    value="SBXSTG007",
+                    system="https://bis.pmjay.gov.in",
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
+                                code="PMJAY",
+                                display="Pradhan Mantri Jan Aarogya Yojana (PMJAY) ID",
+                            )
+                        ]
+                    ),
+                ),
+                # Identifier(
+                #     value="",
+                #     system="https://bis.pmjay.gov.in",
+                #     type=CodeableConcept(
+                #         coding=[
+                #             Coding(
+                #                 system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                #                 code="JHN",
+                #                 display="Jurisdictional health number",
+                #             )
+                #         ]
+                #     ),
+                # ),
                 Identifier(
                     value=id,
                     system=f"{CARE_IDENTIFIER_SYSTEM}/patient",
@@ -164,7 +243,7 @@ class Fhir:
                             )
                         ]
                     ),
-                )
+                ),
             ],
             name=[HumanName(text=patient.name)],
             telecom=[
@@ -226,7 +305,20 @@ class Fhir:
                             )
                         ]
                     ),
-                )
+                ),
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-identifier-type-code",
+                                code="HPIN",
+                                display="Health Practitioner ID issued by NDHM",
+                            )
+                        ]
+                    ),
+                    system="https://hpr.abdm.gov.in",
+                    value="khavinshankar@hpr.abdm",
+                ),
             ],
             name=[HumanName(text=user.full_name)],
             telecom=[
@@ -253,6 +345,46 @@ class Fhir:
     def _organization(self, facility: FacilityModel):
         id = str(facility.external_id)
 
+        if facility.name == "SHA HP":
+            return Organization(
+                id=id,
+                meta={
+                    "profile": [
+                        "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
+                    ]
+                },
+                identifier=[
+                    # FIXME: remove this once we have a real identifier
+                    {
+                        "type": {
+                            "coding": [
+                                {
+                                    "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                                    "code": "NIIP",
+                                    "display": "National Insurance Payor Identifier (Payor)",
+                                }
+                            ]
+                        },
+                        "system": "https://facility.abdm.gov.in",
+                        "value": "1518",
+                    }
+                ],
+                active=True,
+                type=[
+                    {
+                        "coding": [
+                            {
+                                "system": "http://terminology.hl7.org/CodeSystem/organization-type",
+                                "code": "pay",
+                                "display": "Payer",
+                            }
+                        ]
+                    }
+                ],
+                name="SHA HP",
+                contact=[{"telecom": [{"system": "phone", "value": "8272905341"}]}],
+            )
+
         return Organization(
             id=id,
             meta=Meta(
@@ -262,9 +394,36 @@ class Fhir:
             ),
             identifier=[
                 # FIXME: add health facility id
+                # {
+                #         "type": {
+                #             "coding": [
+                #                 {
+                #                     "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                #                     "code": "NPI",
+                #                     "display": "National provider identifier",
+                #                 }
+                #             ]
+                #         },
+                #         "system": "https://facility.abdm.gov.in",
+                #         "value": "IN1910000151",
+                #     }
                 Identifier(
-                    system=f"{CARE_IDENTIFIER_SYSTEM}/facility",
-                    value=id,
+                    # FIXME: remove this once we have a real identifier
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="NPI",
+                                display="National provider identifier",
+                            )
+                        ]
+                    ),
+                    system="https://facility.abdm.gov.in",
+                    value="IN2910001986",
+                ),
+                Identifier(
+                    system="https://facility.abdm.gov.in",
+                    value="IN2910001986",
                     type=CodeableConcept(
                         coding=[
                             Coding(
@@ -274,7 +433,7 @@ class Fhir:
                             )
                         ]
                     ),
-                )
+                ),
             ],
             type=[
                 CodeableConcept(
@@ -374,12 +533,13 @@ class Fhir:
 
     def _attachment(self, attachment: FileUpload):
         id = str(attachment.external_id)
-        url = attachment.files_manager.read_signed_url(attachment)
+        content_type, content = attachment.files_manager.file_contents(attachment)
 
         return Attachment(
             id=id,
             title=attachment.name,
-            url=url,
+            contentType=content_type,
+            data=base64.b64encode(content),
         )
 
     def _coding(self, coding: CodingSpec | None):
@@ -452,7 +612,22 @@ class Fhir:
             meta=Meta(
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Coverage"],
             ),
-            identifier=[Identifier(value=id)],
+            # FIXME: remove this once we have a real identifier
+            identifier=[
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="NH",
+                                display="National Health Plan Identifier",
+                            )
+                        ]
+                    ),
+                    system="https://payer.nha.gov.in",
+                    value="PMJAY/HP/S/G",
+                )
+            ],
             subscriberId=coverage.policy.memberid,
             beneficiary=self._reference(
                 self._patient(
@@ -471,6 +646,7 @@ class Fhir:
                             )
                         )
                         | Q(abha_number__mobile=coverage.policy.mobilenumber)
+                        | Q(external_id="2b970012-eb54-4fb1-a670-1d053c9513cd")
                     )
                     .first()
                 )
@@ -479,6 +655,12 @@ class Fhir:
                 self._reference(self._participant_to_organization(coverage.insurer))
             ],
             status="active",
+            period=self._ist_period(
+                coverage.policy.policy_period.start,
+                coverage.policy.policy_period.end,
+            )
+            if coverage.policy.policy_period
+            else None,
         )
 
     @cache_profiles(CommunicationRequest.get_resource_type())
@@ -498,7 +680,9 @@ class Fhir:
             category=[CodeableConcept(**category) for category in request.category]
             if request.category
             else None,
-            authoredOn=request.authored_on.isoformat() if request.authored_on else None,
+            authoredOn=self._to_ist(request.authored_on)
+            if request.authored_on
+            else None,
             payload=[
                 CommunicationRequestPayload(**payload) for payload in request.payload
             ]
@@ -526,7 +710,7 @@ class Fhir:
                 self._coding_to_codable_concept(CodingSpec(**coding))
                 for coding in communication.category
             ],
-            sent=communication.sent.isoformat() if communication.sent else None,
+            sent=self._to_ist(communication.sent) if communication.sent else None,
             payload=[
                 CommunicationPayload(
                     contentString=payload.get("content_string"),
@@ -575,7 +759,7 @@ class Fhir:
                 )
             ),
             purpose=request.purpose,
-            created=request.created_date.isoformat(),
+            created=self._to_ist(request.created_date),
             patient=self._reference(self._patient(request.patient)),
             enterer=self._reference(self._practitioner(request.created_by)),
             provider=self._reference(self._organization(request.provider.facility)),
@@ -654,8 +838,13 @@ class Fhir:
                             if not diagnosis.get("diagnosis_reference")
                             else None,
                         )
-                        for diagnosis in item.get("diagnosis")
+                        for diagnosis in item.get("diagnosis") or []
                     ],
+                    modifier=[
+                        self._coding_to_codable_concept(CodingSpec(**modifier))
+                        for modifier in item.get("modifier", [])
+                    ]
+                    or None,
                 )
                 for item in request.item
             ],
@@ -670,15 +859,179 @@ class Fhir:
         cloned.external_id = new_external_id
         return cloned
 
+    def _qr_item(self, item: dict) -> QuestionnaireResponseItem:
+        return QuestionnaireResponseItem(
+            linkId=item["link_id"],
+            text=item.get("text"),
+            answer=[
+                QuestionnaireResponseItemAnswer(
+                    valueBoolean=answer.get("value_boolean"),
+                    valueDecimal=answer.get("value_decimal"),
+                    valueInteger=answer.get("value_integer"),
+                    valueDate=answer.get("value_date"),
+                    valueDateTime=answer.get("value_date_time"),
+                    valueTime=answer.get("value_time"),
+                    valueString=answer.get("value_string"),
+                    valueUri=answer.get("value_uri"),
+                    valueCoding=Coding(**answer["value_coding"])
+                    if answer.get("value_coding")
+                    else None,
+                    valueQuantity=Quantity(**answer["value_quantity"])
+                    if answer.get("value_quantity")
+                    else None,
+                    valueAttachment=self._attachment(file_upload)
+                    if answer.get("value_attachment")
+                    and (
+                        file_upload := FileUpload.objects.filter(
+                            external_id=answer.get("value_attachment")
+                        ).first()
+                    )
+                    else None,
+                )
+                for answer in item.get("answer", [])
+            ]
+            or None,
+            item=[self._qr_item(child) for child in item.get("item", [])] or None,
+        )
+
+    def _questionnaire_response(
+        self, qr_data: dict, patient: PatientModel
+    ) -> QuestionnaireResponse:
+        qr_id = str(uuid4())
+
+        qr = QuestionnaireResponse(
+            id=qr_id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/QuestionnaireResponse"
+                ],
+            ),
+            status="completed",
+            questionnaire=qr_data["questionnaire"],
+            subject=self._reference(self._patient(patient)),
+            authored=self._to_ist(datetime.now(UTC)),
+            item=[self._qr_item(item) for item in qr_data.get("item", [])] or None,
+        )
+
+        cache_key = f"QuestionnaireResponse/{qr_id}"
+        self._profiles[cache_key] = qr
+        self._resource_id_url_map[cache_key] = qr_id
+
+        return qr
+
     def _claim(self, claim: ClaimModel):
         id = str(claim.external_id)
+
+        _all_si_seqs = [
+            si.get("sequence", 0) for si in (claim.supporting_info or [])
+        ] + [qr.get("sequence", 0) for qr in (claim.questionnaire_responses or [])]
+        _next_seq = (max(_all_si_seqs) + 1) if _all_si_seqs else 1
+        _raw_dt = (
+            claim.encounter.period.get("start")
+            if claim.encounter and claim.encounter.period
+            else None
+        )
+        _encounter_dt = (
+            self._to_ist(datetime.fromisoformat(_raw_dt))
+            if _raw_dt
+            else self._to_ist(claim.created_date)
+        )
+
+        _related_pre_auth_refs = []
+        for _related in claim.related or []:
+            _related_claim = ClaimModel.objects.filter(
+                external_id=_related.get("claim")
+            ).first()
+            if _related_claim:
+                _related_response = (
+                    ClaimResponseModel.objects.filter(
+                        request=_related_claim, pre_auth_ref__isnull=False
+                    )
+                    .exclude(pre_auth_ref="")
+                    .order_by("-created_date")
+                    .first()
+                )
+                if _related_response and _related_response.pre_auth_ref:
+                    _related_pre_auth_refs.append(_related_response.pre_auth_ref)
+
+        _raw_disposition = (
+            (claim.encounter.hospitalization or {}).get("discharge_disposition")
+            if claim.encounter
+            else None
+        )
+        _dis_code, _dis_display = _DISCHARGE_DISPOSITION_NDHM_MAP.get(
+            _raw_disposition or "",
+            ("DTH", "DischargeToHome (Discharge disposition status)"),
+        )
+
+        _discharge_summary_attachment = None
+        if claim.use == "claim" and claim.encounter:
+            encounter_id = str(claim.encounter.external_id)
+            report_upload = (
+                ReportUploadModel.objects.filter(
+                    report_type="discharge_summary",
+                    associating_id=encounter_id,
+                    upload_completed=True,
+                    is_archived=False,
+                )
+                .order_by("-created_date")
+                .first()
+            )
+            if not report_upload:
+                template = ReportTemplate.objects.filter(
+                    template_type="discharge_summary",
+                    status="active",
+                ).first()
+                if template:
+                    try:
+                        report_upload = generate_and_upload_report(
+                            template=template,
+                            report_type="discharge_summary",
+                            associating_id=encounter_id,
+                            output_format=template.default_format or "pdf",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to generate discharge summary for claim %s",
+                            claim.external_id,
+                        )
+            if report_upload:
+                try:
+                    content_type, content = report_upload.files_manager.file_contents(
+                        report_upload
+                    )
+                    _discharge_summary_attachment = Attachment(
+                        id=str(report_upload.external_id),
+                        title=report_upload.name,
+                        contentType=content_type,
+                        data=base64.b64encode(content),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to read discharge summary for claim %s",
+                        claim.external_id,
+                    )
 
         return Claim(
             id=id,
             meta=Meta(
                 profile=["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Claim"],
             ),
-            identifier=[Identifier(value=id)],
+            identifier=[
+                Identifier(
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="https://www.nrces.in/preview/ndhm/fhir/r4/ValueSet-ndhm-identifier-type-code.html",
+                                code="CLN",
+                                display="Claim number",
+                            )
+                        ]
+                    ),
+                    system=f"urn:uuid:{id}",
+                    value=id,
+                )
+            ],
             status=claim.status,
             type=self._coding_to_codable_concept(CodingSpec(**claim.type)),
             use=claim.use,
@@ -688,7 +1041,7 @@ class Fhir:
                     code=claim.priority,
                 )
             ),
-            created=claim.created_date.isoformat(),
+            created=self._to_ist(claim.created_date),
             billablePeriod=Period(**claim.billable_period)
             if claim.billable_period
             else None,
@@ -708,6 +1061,7 @@ class Fhir:
                             Participant(**claim.insurer),
                         )
                     ),
+                    preAuthRef=_related_pre_auth_refs or None,
                 )
                 for insurance in claim.insurance
             ],
@@ -838,33 +1192,115 @@ class Fhir:
             ]
             if claim.procedure
             else None,
-            supportingInfo=[
+            supportingInfo=(
+                [
+                    ClaimSupportingInfo(
+                        sequence=supporting_info.get("sequence"),
+                        category=self._coding_to_codable_concept(
+                            CodingSpec(**supporting_info.get("category"))
+                        ),
+                        code=self._coding_to_codable_concept(
+                            CodingSpec(**supporting_info.get("code"))
+                        ),
+                        timingPeriod=Period(**supporting_info.get("timing"))
+                        if supporting_info.get("timing")
+                        else None,
+                        valueString=supporting_info.get("value_string"),
+                        valueAttachment=self._attachment(si_file)
+                        if supporting_info.get("value_attachment")
+                        and (
+                            si_file := FileUpload.objects.filter(
+                                external_id=supporting_info.get("value_attachment")
+                            ).first()
+                        )
+                        else None,
+                    )
+                    for supporting_info in claim.supporting_info
+                ]
+                if claim.supporting_info
+                else []
+            )
+            + [
                 ClaimSupportingInfo(
-                    sequence=supporting_info.get("sequence"),
+                    sequence=qr_data.get("sequence"),
                     category=self._coding_to_codable_concept(
-                        CodingSpec(**supporting_info.get("category"))
+                        CodingSpec(**qr_data.get("category"))
                     ),
                     code=self._coding_to_codable_concept(
-                        CodingSpec(**supporting_info.get("code"))
+                        CodingSpec(**qr_data.get("code"))
                     ),
-                    timingPeriod=Period(**supporting_info.get("timing"))
-                    if supporting_info.get("timing")
-                    else None,
-                    valueString=supporting_info.get("value_string"),
-                    valueAttachment=self._attachment(
-                        FileUpload.objects.filter(
-                            external_id=supporting_info.get("value_attachment")
-                        ).first()
-                    )
-                    if supporting_info.get("value_attachment")
-                    else None,
+                    valueReference=self._reference(
+                        self._questionnaire_response(qr_data, claim.patient)
+                    ),
                 )
-                for supporting_info in claim.supporting_info
+                for qr_data in (claim.questionnaire_responses or [])
             ]
-            if claim.supporting_info
-            else None,
+            + [
+                ClaimSupportingInfo(
+                    sequence=_next_seq,
+                    category=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                            code="ONS",
+                            display="Period, start or end dates of aspects of the Condition. (e.g. admission, discharge etc)",
+                        )
+                    ),
+                    code=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
+                            code="ADDD",
+                            display="Admission date -Discharge date",
+                        )
+                    ),
+                    valueString=_encounter_dt,
+                ),
+                ClaimSupportingInfo(
+                    sequence=_next_seq + 1,
+                    category=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                            code="OTH",
+                            display="Other",
+                        )
+                    ),
+                    code=self._coding_to_codable_concept(
+                        CodingSpec(
+                            system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-code",
+                            code="EDT",
+                            display="EncounterDateTime",
+                        )
+                    ),
+                    valueString=_encounter_dt,
+                ),
+            ]
+            + (
+                [
+                    ClaimSupportingInfo(
+                        sequence=_next_seq + 2,
+                        category=self._coding_to_codable_concept(
+                            CodingSpec(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                                code="DIS",
+                                display="Discharge status and discharge to location detail",
+                            )
+                        ),
+                        code=self._coding_to_codable_concept(
+                            CodingSpec(
+                                system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-supportinginfo-category",
+                                code=_dis_code,
+                                display=_dis_display,
+                            )
+                        ),
+                        valueString="After treatment",  # TODO: fix the hard coding
+                    )
+                ]
+                if _discharge_summary_attachment
+                else []
+            )
+            or None,
             item=[
                 ClaimItem(
+                    id=f"item-{item.get('sequence')}",
                     sequence=item.get("sequence"),
                     careTeamSequence=item.get("care_team_sequence"),
                     diagnosisSequence=item.get("diagnosis_sequence"),
@@ -880,15 +1316,21 @@ class Fhir:
                     )
                     if item.get("product_or_service")
                     else None,
+                    modifier=[
+                        self._coding_to_codable_concept(CodingSpec(**modifier))
+                        for modifier in item.get("modifier", [])
+                    ]
+                    or None,
                     programCode=[
                         self._coding_to_codable_concept(CodingSpec(**program_code))
                         for program_code in item.get("program_code")
                     ]
                     if item.get("program_code")
                     else None,
-                    servicedPeriod=Period(**item.get("serviced_period"))
-                    if item.get("serviced_period")
-                    else None,
+                    servicedPeriod=self._ist_period(
+                        item.get("serviced_period", {}).get("start"),
+                        item.get("serviced_period", {}).get("end"),
+                    ),
                     unitPrice=Money(
                         value=item.get("unit_price"),
                         currency="INR",
@@ -909,8 +1351,8 @@ class Fhir:
                     else None,
                     net=Money(
                         value=(
-                            (item.get("unit_price", 0))
-                            * (item.get("quantity", {}).get("value", 1))
+                            float(item.get("unit_price", 0))
+                            * float(item.get("quantity", {}).get("value", 1))
                         ),
                         currency="INR",
                     ),
@@ -923,8 +1365,8 @@ class Fhir:
             total=Money(
                 value=(
                     sum(
-                        (item.get("unit_price", 0))
-                        * (item.get("quantity", {}).get("value", 1))
+                        float(item.get("unit_price", 0))
+                        * float(item.get("quantity", {}).get("value", 1))
                         for item in claim.item
                     )
                 ),
@@ -976,11 +1418,11 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/CoverageEligibilityRequestBundle"
                 ],
-                lastUpdated=coverage_eligibility_request.modified_date.isoformat(),
+                lastUpdated=self._to_ist(coverage_eligibility_request.modified_date),
             ),
             identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
             type="collection",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=self._to_ist(datetime.now(UTC)),
             entry=[
                 self._bundle_entry(
                     self._coverage_eligibility_request(coverage_eligibility_request)
@@ -988,6 +1430,69 @@ class Fhir:
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
         )
+
+    _INPATIENT_ENCOUNTER_CLASSES = ("imp", "obsenc")
+
+    def _build_abdm_fhir_with_seeded_cache(self) -> tuple[AbdmFhir, set[str]]:
+        """
+        Spin up an AbdmFhir instance pre-seeded with the profiles & urn:uuid map
+        already built on this nhcx Fhir instance. abdm's @cache_profiles short-
+        circuits when a key exists, so any abdm helper that asks for the same
+        Patient/Practitioner/Organization/Encounter reuses nhcx's resource and
+        urn:uuid — no duplicate bundle entries.
+        """
+        abdm_fhir = AbdmFhir()
+        abdm_fhir._profiles = dict(self._profiles)  # noqa: SLF001
+        abdm_fhir._resource_id_url_map = dict(self._resource_id_url_map)  # noqa: SLF001
+        return abdm_fhir, set(self._profiles)
+
+    def _claim_supplementary_entries(self, claim: ClaimModel) -> list[BundleEntry]:
+        if claim.use != "claim" or not claim.encounter:
+            return []
+
+        abdm_fhir, seeded_keys = self._build_abdm_fhir_with_seeded_cache()
+        entries: list[BundleEntry] = []
+
+        account = AccountModel.objects.filter(
+            patient=claim.patient,
+            facility=claim.encounter.facility,
+            primary_encounter=claim.encounter,
+        ).first()
+
+        if not account:
+            account = AccountModel.objects.filter(
+                patient=claim.patient,
+                facility=claim.encounter.facility,
+                status=AccountStatusOptions.active.value,
+                billing_status=AccountBillingStatusOptions.open.value,
+            ).first()
+
+        if account:
+            for invoice in InvoiceModel.objects.filter(
+                account=account,
+            ).select_related(
+                "patient", "facility", "account", "account__primary_encounter"
+            ):
+                composition = abdm_fhir._invoice_record_composition(  # noqa: SLF001
+                    invoice, str(uuid4())
+                )
+                entries.append(abdm_fhir._bundle_entry(composition))  # noqa: SLF001
+
+        if claim.encounter.encounter_class in self._INPATIENT_ENCOUNTER_CLASSES:
+            composition = abdm_fhir._discharge_summary_composition(  # noqa: SLF001
+                claim.encounter, str(uuid4())
+            )
+        else:
+            composition = abdm_fhir._op_consult_composition(  # noqa: SLF001
+                claim.encounter, str(uuid4())
+            )
+        entries.append(abdm_fhir._bundle_entry(composition))  # noqa: SLF001
+
+        for key, profile in abdm_fhir._profiles.items():  # noqa: SLF001
+            if key not in seeded_keys and profile is not None:
+                entries.append(abdm_fhir._bundle_entry(profile))  # noqa: SLF001
+
+        return entries
 
     def create_claim_bundle(self, claim: ClaimModel):
         id = str(claim.external_id)
@@ -998,14 +1503,15 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ClaimBundle"
                 ],
-                lastUpdated=claim.modified_date.isoformat(),
+                lastUpdated=self._to_ist(claim.modified_date),
             ),
             identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
             type="collection",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=self._to_ist(datetime.now(UTC)),
             entry=[
                 self._bundle_entry(self._claim(claim)),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
+                *self._claim_supplementary_entries(claim),
             ],
         )
 
@@ -1018,62 +1524,286 @@ class Fhir:
                 profile=[
                     "https://nrces.in/ndhm/fhir/r4/StructureDefinition/TaskBundle"
                 ],
-                lastUpdated=task.modified_date.isoformat(),
+                lastUpdated=self._to_ist(task.modified_date),
             ),
             identifier=Identifier(value=id, system=f"{CARE_IDENTIFIER_SYSTEM}/bundle"),
             type="collection",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=self._to_ist(datetime.now(UTC)),
             entry=[
                 self._bundle_entry(self._task(task)),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
         )
 
+    @staticmethod
+    def _build_bundle_index(bundle_entries: list) -> dict:
+        """Return a fullUrl -> resource dict for fast reference resolution."""
+        return {
+            entry.get("fullUrl"): entry.get("resource")
+            for entry in bundle_entries
+            if entry.get("fullUrl") and entry.get("resource")
+        }
+
+    @staticmethod
+    def _resolve_ref(reference: str, bundle_index: dict) -> dict | None:
+        """
+        Resolve a FHIR relative or absolute reference against the bundle index.
+        Handles both urn:uuid: and https:// fullUrls.
+        """
+        if not reference:
+            return None
+        resource = bundle_index.get(reference)
+        if resource:
+            return resource
+        # Fallback: match by suffix (absolute URL vs urn:uuid mismatch)
+        for url, res in bundle_index.items():
+            if url and url.endswith(reference.split("/")[-1]):
+                return res
+        return None
+
+    @staticmethod
+    def _extract_identifier(identifiers: list, code: str) -> str | None:
+        """Extract a specific identifier value by type code from a FHIR identifier list."""
+        for ident in identifiers or []:
+            codings = ident.get("type", {}).get("coding", [])
+            if any(c.get("code") == code for c in codings):
+                return ident.get("value")
+        return None
+
+    @staticmethod
+    def _resolve_patient_fields(patient_resource: dict | None) -> dict:
+        """Extract flat identity fields from a FHIR Patient resource."""
+        if not patient_resource:
+            return {
+                "pmjay_id": None,
+                "abha_id": None,
+                "name": None,
+                "dob": None,
+                "gender": None,
+            }
+        identifiers = patient_resource.get("identifier", [])
+        name_list = patient_resource.get("name", [])
+        name = None
+        if name_list:
+            name = name_list[0].get("text") or " ".join(name_list[0].get("given", []))
+        return {
+            "pmjay_id": Fhir._extract_identifier(identifiers, "PMJAY"),
+            "abha_id": Fhir._extract_identifier(identifiers, "ABHA"),
+            "name": name,
+            "dob": patient_resource.get("birthDate"),
+            "gender": patient_resource.get("gender"),
+        }
+
+    @staticmethod
+    def _resolve_coverage_fields(coverage_resource: dict | None) -> dict:
+        """Extract flat plan fields from a FHIR Coverage resource."""
+        if not coverage_resource:
+            return {"plan_name": None, "plan_id": None, "policy_period": None}
+        classes = coverage_resource.get("class", [])
+        period = coverage_resource.get("period")
+        return {
+            "plan_name": classes[0].get("name") if classes else None,
+            "plan_id": classes[0].get("value") if classes else None,
+            "policy_period": {"start": period.get("start"), "end": period.get("end")}
+            if period
+            else None,
+        }
+
+    @staticmethod
+    def _parse_item_balance(benefits: list) -> dict | None:
+        """Extract balance dict from validation-response benefits."""
+        allowed = next(
+            (b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None
+        )
+        used = next((b.get("usedMoney") for b in benefits if b.get("usedMoney")), None)
+        if not (allowed or used):
+            return None
+        return {
+            "allowed": allowed or {"value": 0.0, "currency": "INR"},
+            "used": used or {"value": 0.0, "currency": "INR"},
+        }
+
+    @staticmethod
+    def _parse_item_procedure(item: dict, benefits: list) -> dict:
+        """Extract procedure dict from benefits/auth-requirements item."""
+        pos_codings = (item.get("productOrService") or {}).get("coding", [])
+        category_codings = (item.get("category") or {}).get("coding", [])
+        allowed_money = next(
+            (b.get("allowedMoney") for b in benefits if b.get("allowedMoney")), None
+        )
+
+        required_documents = []
+        required_questionnaires = []
+        for supporting in item.get("authorizationSupporting") or []:
+            text = supporting.get("text", "")
+            code_entry = (supporting.get("coding") or [{}])[0]
+            if text.startswith("fullUrl:"):
+                required_questionnaires.append(
+                    {
+                        "id": code_entry.get("code", ""),
+                        "display": code_entry.get("display", ""),
+                        "url": text.removeprefix("fullUrl:").strip(),
+                    }
+                )
+            else:
+                required_documents.append(
+                    {
+                        "code": code_entry.get("code", ""),
+                        "display": code_entry.get("display", ""),
+                    }
+                )
+
+        return {
+            "code": pos_codings[0].get("code") if pos_codings else None,
+            "display": pos_codings[0].get("display") if pos_codings else None,
+            "category": {
+                "code": category_codings[0].get("code"),
+                "display": category_codings[0].get("display"),
+            }
+            if category_codings
+            else None,
+            "excluded": item.get("excluded", False),
+            "allowed_amount": allowed_money,
+            "authorization_required": item.get("authorizationRequired", False),
+            "required_documents": required_documents,
+            "required_questionnaires": required_questionnaires,
+        }
+
+    @staticmethod
+    def _parse_insurances(
+        fhir_insurance: list,
+        bundle_index: dict,
+        primary_pmjay_id: str | None,
+    ) -> list[dict]:
+        """
+        Dereference the FHIR insurance array into a flat, self-contained list
+        of InsuranceEntry dicts matching InsuranceEntrySpec.
+
+        Each entry resolves Coverage → Patient from the bundle index so that
+        consumers never need to touch the raw bundle.
+        """
+        entries = []
+        for ins in fhir_insurance or []:
+            coverage_ref = (ins.get("coverage") or {}).get("reference")
+            coverage_resource = Fhir._resolve_ref(coverage_ref, bundle_index)
+
+            patient_ref = (
+                (coverage_resource.get("beneficiary") or {}).get("reference")
+                if coverage_resource
+                else None
+            )
+            patient_resource = (
+                Fhir._resolve_ref(patient_ref, bundle_index) if patient_ref else None
+            )
+
+            patient_fields = Fhir._resolve_patient_fields(patient_resource)
+            coverage_fields = Fhir._resolve_coverage_fields(coverage_resource)
+            pmjay_id = patient_fields["pmjay_id"]
+
+            entry: dict = {
+                "pmjay_id": pmjay_id or "",
+                "is_primary": pmjay_id == primary_pmjay_id if pmjay_id else False,
+                **patient_fields,
+                "inforce": ins.get("inforce", False),
+                **coverage_fields,
+                "balance": None,
+                "items": [],
+            }
+
+            items = ins.get("item") or []
+            for item in items:
+                benefits = item.get("benefit") or []
+                if any("usedMoney" in b for b in benefits):
+                    entry["balance"] = Fhir._parse_item_balance(benefits)
+                else:
+                    procedure = Fhir._parse_item_procedure(item, benefits)
+                    if procedure:
+                        entry["items"].append(procedure)
+
+            entries.append(entry)
+        return entries
+
     def process_coverage_eligibility_check_response(
         self, response: dict, headers: dict
     ):
         # Using construct to avoid fhir validation errors
         coverage_eligibility_response_bundle = Bundle.construct(**response)
+        bundle_entries = coverage_eligibility_response_bundle.entry or []
 
+        cer_resource = next(
+            (
+                entry.get("resource")
+                for entry in bundle_entries
+                if entry.get("resource", {}).get("resourceType")
+                == "CoverageEligibilityResponse"
+            ),
+            None,
+        )
         coverage_eligibility_response = CoverageEligibilityResponse.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "CoverageEligibilityResponse",
-                    coverage_eligibility_response_bundle.entry,
-                )
-            ).get("resource")
+            **cer_resource
         )
 
-        coverage_eligibility_request = CoverageEligibilityRequest.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "CoverageEligibilityRequest",
-                    coverage_eligibility_response_bundle.entry,
-                )
-            ).get("resource")
-        )
-        request_id = coverage_eligibility_request.id
-
+        request_id = headers.get("x-hcx-correlation_id")
         coverage_eligibility_request_instance = (
             CoverageEligibilityRequestModel.objects.filter(external_id=request_id)
         ).first()
 
-        # TODO: use CoverageEligibilityResponseSpec to create the instance
+        # Determine the primary PMJAY ID from the original request bundle entry.
+        # The CoverageEligibilityRequest in the bundle has insurance[0].coverage
+        # pointing to a Coverage with subscriberId = the requesting patient's PMJAY ID.
+        bundle_index = self._build_bundle_index(bundle_entries)
+        primary_pmjay_id = None
+        req_resource = next(
+            (
+                entry.get("resource")
+                for entry in bundle_entries
+                if entry.get("resource", {}).get("resourceType")
+                == "CoverageEligibilityRequest"
+            ),
+            None,
+        )
+        if req_resource:
+            req_insurances = req_resource.get("insurance") or []
+            if req_insurances:
+                req_cov_ref = (req_insurances[0].get("coverage") or {}).get("reference")
+                req_coverage = self._resolve_ref(req_cov_ref, bundle_index)
+                if req_coverage:
+                    primary_pmjay_id = req_coverage.get("subscriberId")
+
+        insurances = self._parse_insurances(
+            fhir_insurance=coverage_eligibility_response.insurance,
+            bundle_index=bundle_index,
+            primary_pmjay_id=primary_pmjay_id,
+        )
+
         coverage_eligibility_response_instance = (
             CoverageEligibilityResponseModel.objects.create(
                 request=coverage_eligibility_request_instance,
                 outcome=coverage_eligibility_response.outcome,
                 error=coverage_eligibility_response.error,
                 disposition=coverage_eligibility_response.disposition,
-                insurance=coverage_eligibility_response.insurance,
+                insurance=insurances,
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,
                 },
             )
         )
+
+        if coverage_eligibility_request_instance is not None:
+            outcome = coverage_eligibility_response.outcome or ""
+            if outcome == "partial":
+                coverage_eligibility_request_instance.dispatch_status = (
+                    DispatchStatusChoices.PARTIAL
+                )
+            elif outcome != "queued":
+                coverage_eligibility_request_instance.dispatch_status = (
+                    DispatchStatusChoices.COMPLETE
+                )
+            # "queued" leaves dispatch_status unchanged (stays AWAITING)
+            coverage_eligibility_request_instance.save(
+                update_fields=["dispatch_status", "modified_date"]
+            )
 
         return (
             coverage_eligibility_response_instance,
@@ -1094,33 +1824,45 @@ class Fhir:
             ).get("resource")
         )
 
-        claim_request = Claim.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "Claim",
-                    claim_response_bundle.entry,
-                )
-            ).get("resource")
-        )
-        request_id = claim_request.id
+        request_id = headers.get("x-hcx-correlation_id")
 
         claim_instance = ClaimModel.objects.filter(external_id=request_id).first()
 
         # TODO: use ClaimResponseSpec to create the instance
         claim_response_instance = ClaimResponseModel.objects.create(
             request=claim_instance,
+            use=claim_response.use,
+            status=claim_response.status,
             outcome=claim_response.outcome,
-            error=claim_response.error,
             disposition=claim_response.disposition,
+            pre_auth_ref=getattr(claim_response, "preAuthRef", None),
+            adjudication=claim_response.adjudication,
+            identifier=claim_response.identifier,
+            type=claim_response.type,
             item=claim_response.item,
             add_item=claim_response.addItem,
             total=claim_response.total,
+            error=claim_response.error,
             meta={
                 "raw_response": response,
                 "raw_headers": headers,
             },
         )
+
+        if claim_instance is not None:
+            # FHIR outcome "partial" means the payer gave a partial response
+            # and a further full response is still expected — map to our
+            # PARTIAL state so the UI can signal "awaiting full response".
+            # "queued" means the payer ack'd and is still processing — stays
+            # AWAITING (same as before the callback). Everything else
+            # (complete, error) is terminal — map to COMPLETE.
+            outcome = claim_response.outcome or ""
+            if outcome == "partial":
+                claim_instance.dispatch_status = DispatchStatusChoices.PARTIAL
+            elif outcome != "queued":
+                claim_instance.dispatch_status = DispatchStatusChoices.COMPLETE
+            # "queued" leaves dispatch_status unchanged (stays AWAITING)
+            claim_instance.save(update_fields=["dispatch_status", "modified_date"])
 
         return (claim_response_instance, claim_instance)
 
@@ -1289,45 +2031,123 @@ class Fhir:
         return (task_instance, payment_reconciliation_instance, claim_instance)
 
     def process_insurance_plan_response(self, response: dict, headers: dict):
-        # Using construct to avoid fhir validation errors
-        insurance_plan_response_bundle = Bundle.construct(**response)
-
-        insurance_plan = InsurancePlan.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "InsurancePlan",
-                    insurance_plan_response_bundle.entry,
-                )
-            ).get("resource")
-        )
-
         task = TaskModel.objects.filter(
             external_id=headers.get("x-hcx-correlation_id")
         ).first()
         if not task:
             raise Exception("Correlation ID not found")
 
-        insurance_plan_instance = InsurancePlanModel.objects.create(
-            identifier=insurance_plan_response_bundle.id,
-            extension=insurance_plan.extension,
-            product_identifier=insurance_plan.identifier,
-            status=insurance_plan.status,
-            type=insurance_plan.type,
-            name=insurance_plan.name,
-            alias=insurance_plan.alias,
-            period=insurance_plan.period,
-            contact=insurance_plan.contact,
-            coverage=insurance_plan.coverage,
-            plan=insurance_plan.plan,
-            request=task,
-            meta={
-                "raw_response": response,
-                "raw_headers": headers,
-            },
-        )
+        # NDHM InsurancePlan bundles are large (often 50-100 MB once decrypted)
+        # so we skip the pydantic round-trip and hand the raw bundle dict
+        # directly to the ingestor, which fans the tree out into ~25-30k rows
+        # using bulk_create inside a single transaction.
+        insurance_plan_instance = InsurancePlanIngestor(
+            bundle=response,
+            task=task,
+            raw_response=response,
+            raw_headers=headers,
+        ).run()
 
         task.focus = insurance_plan_instance
-        task.save()
+        task.dispatch_status = DispatchStatusChoices.COMPLETE
+        task.save(
+            update_fields=["focus_type", "focus_id", "dispatch_status", "modified_date"]
+        )
 
         return (task, insurance_plan_instance)
+
+    def process_task_response(self, response: dict, headers: dict):
+        # FIXME: make this dynamic to handle cancel and reprocess responses
+
+        # Using construct to avoid fhir validation errors
+        task_response_bundle = Bundle.construct(**response)
+
+        task_request = TaskModel.objects.filter(
+            external_id=headers.get("x-hcx-correlation_id")
+        ).first()
+        if not task_request:
+            raise Exception("Correlation ID not found")
+
+        task = Task.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "Task",
+                    task_response_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        claim_response = ClaimResponse.construct(
+            **next(
+                filter(
+                    lambda entry: entry.get("resource", {}).get("resourceType")
+                    == "ClaimResponse",
+                    task_response_bundle.entry,
+                )
+            ).get("resource")
+        )
+
+        claim_instance = task_request.claim
+
+        with transaction.atomic():
+            # TODO: use TaskSpec to create the instance
+            task_instance = TaskModel.objects.create(
+                identifier=task.id,
+                status=task.status,
+                intent=task.intent,
+                priority=task.priority,
+                code=task.code,
+                authored_on=task.authoredOn,
+                description=task.description,
+                reason_code=task.reasonCode,
+                input=task.input,
+                output=task.output,
+                claim=claim_instance,
+                use_case=TaskUseCaseChoices.CANCEL_RESPONSE,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            # TODO: use ClaimResponseSpec to create the instance
+            claim_response_instance = ClaimResponseModel.objects.create(
+                request=claim_instance,
+                use=claim_response.use,
+                status=claim_response.status,
+                outcome=claim_response.outcome,
+                disposition=claim_response.disposition,
+                pre_auth_ref=getattr(claim_response, "preAuthRef", None),
+                adjudication=claim_response.adjudication,
+                identifier=claim_response.identifier,
+                type=claim_response.type,
+                item=claim_response.item,
+                add_item=claim_response.addItem,
+                total=claim_response.total,
+                error=claim_response.error,
+                meta={
+                    "raw_response": response,
+                    "raw_headers": headers,
+                },
+            )
+
+            task_instance.part_of = task_request
+            task_instance.focus = claim_response_instance
+            task_instance.save()
+
+            # The originating outbound Task received its payer response.
+            # Apply the same partial/queued/complete logic as for Claims.
+            task_response_outcome = claim_response.outcome or ""
+            if task_response_outcome == "partial":
+                task_request.dispatch_status = DispatchStatusChoices.PARTIAL
+            elif task_response_outcome != "queued":
+                task_request.dispatch_status = DispatchStatusChoices.COMPLETE
+            # "queued" leaves dispatch_status unchanged (stays AWAITING)
+            task_request.save(update_fields=["dispatch_status", "modified_date"])
+
+            if task_instance.code.get("coding")[0].get("code") == "approve":
+                claim_instance.status = ClaimStatusChoices.CANCELLED
+                claim_instance.save()
+
+        return (task_instance, claim_response_instance, claim_instance)

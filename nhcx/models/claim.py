@@ -1,6 +1,7 @@
 from django.db import models
 
 from care.emr.models.base import EMRBaseModel
+from nhcx.models import DispatchStatusChoices
 
 
 class Claim(EMRBaseModel):
@@ -28,12 +29,32 @@ class Claim(EMRBaseModel):
     item = models.JSONField(default=list, null=False, blank=False)
     accident = models.JSONField(null=True, blank=True)
     payee = models.JSONField(null=True, blank=True)
+    questionnaire_responses = models.JSONField(default=list, null=True, blank=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    dispatch_error = models.TextField(blank=True, default="")
+    dispatch_status = models.CharField(
+        max_length=16,
+        choices=DispatchStatusChoices.choices,
+        default=DispatchStatusChoices.PENDING,
+        db_index=True,
+    )
 
 
 class ClaimResponse(EMRBaseModel):
     request = models.ForeignKey("nhcx.Claim", on_delete=models.CASCADE)
+    use = models.CharField(max_length=100, null=True, blank=True)
+    status = models.CharField(max_length=100, null=True, blank=True)
     outcome = models.CharField(max_length=100, null=False, blank=False)
     disposition = models.TextField(null=True, blank=True)
+    # Payer-assigned pre-authorization reference number (only on pre-auth approvals).
+    # Required when submitting the subsequent final claim.
+    pre_auth_ref = models.CharField(max_length=255, null=True, blank=True)
+    # Claim-level adjudication list — carries the machine-readable status
+    # (approved / queried / rejected) as opposed to the FHIR outcome enum.
+    adjudication = models.JSONField(null=True, blank=True)
+    # Payer's own identifier(s) for this response (e.g. CLN claim number).
+    identifier = models.JSONField(null=True, blank=True)
+    type = models.JSONField(null=True, blank=True)
     item = models.JSONField(null=True, blank=True)
     add_item = models.JSONField(null=True, blank=True)
     total = models.JSONField(null=True, blank=True)

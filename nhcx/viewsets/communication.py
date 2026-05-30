@@ -17,6 +17,7 @@ from nhcx.specs.communication import (
     CommunicationRetrieveSpec,
     CommunicationStatusChoices,
 )
+from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -102,7 +103,7 @@ class CommunicationViewSet(
             workflow_id="151" if claim.use == ClaimUseChoices.CLAIM else "19",
         )
 
-        _response = GatewayService.communication__on_request(encrypted_payload)
+        dispatch(task, GatewayService.communication__on_request, encrypted_payload)
 
         return Response(
             CommunicationRetrieveSpec.serialize(communication).model_dump(mode="json"),
