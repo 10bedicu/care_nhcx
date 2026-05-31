@@ -1,9 +1,9 @@
-from functools import cache
+from functools import lru_cache
 
 from pydantic import BaseModel, RootModel
 
 
-@cache(maxsize=None)
+@lru_cache(maxsize=None)  # noqa: UP033
 def pydantic_list(model: type[BaseModel]) -> type[RootModel]:
     """Build a cached ``RootModel`` wrapping ``list[model]``.
 
