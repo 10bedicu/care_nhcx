@@ -27,11 +27,17 @@ the workflow code has to be derived from:
   * ``claim.use``                          (preauth / claim)
   * the related claim (``claim.related[0]``)
   * the latest ``ClaimResponse.adjudication`` status of that related claim
-  * whether the related claim is itself part of an *enhancement* chain — i.e.
-    whether any ancestor pre-auth in its ``related`` lineage was approved or
-    partially approved. That walk-back is needed because an enhancement claim
-    can itself be queried (immediate parent status ``queried``), but the chain
-    is still in enhancement mode because of an earlier approval.
+  * whether the submission is an *enhancement* — always determined by a change
+    in line-item codes (``item[].product_or_service``); pure amount /
+    stratification (``program_code``) / implant (``modifier``) changes are not
+    enhancements. There are two flavours of the check:
+      - For an *approved* related claim we diff the line-item codes against the
+        immediate related claim (``_is_item_enhancement``).
+      - For a *queried* related claim we walk the related chain back to the
+        first approved/partially-approved ancestor and diff the items there
+        (``_is_enhancement_claim``). This handles ``enhancement -> query ->
+        query`` chains, where the query responses share items with the
+        enhancement and so can't be detected by diffing the immediate parent.
 """
 
 from enum import StrEnum
@@ -116,16 +122,60 @@ def _related_claim(claim: Claim) -> Claim | None:
     return Claim.objects.filter(external_id=parent_uuid).first()
 
 
+def _item_code_key(item: dict) -> tuple[str | None, str | None]:
+    """
+    Identity of a claim line item for enhancement detection: the
+    ``product_or_service`` coding ``(system, code)``.
+
+    Amount (``quantity`` / ``unit_price`` / ``factor``), stratification
+    (``program_code``) and implant (``modifier``) are intentionally NOT part
+    of the identity — changing only those is not an enhancement.
+    """
+    product_or_service = item.get("product_or_service") or {}
+    return product_or_service.get("system"), product_or_service.get("code")
+
+
+def _item_code_set(claim: Claim) -> set[tuple[str | None, str | None]]:
+    return {_item_code_key(item) for item in claim.item or []}
+
+
+def _is_item_enhancement(claim: Claim) -> bool:
+    """
+    Whether *this* submission is an enhancement of its immediate related claim:
+    the set of line-item codes (``item[].product_or_service``) differs — i.e. a
+    code was added, removed or changed compared to ``related[0].claim``.
+
+    Pure amount / stratification (``program_code``) / implant (``modifier``)
+    changes are NOT enhancements, so only ``product_or_service`` is compared.
+    (Duplicate item codes within a claim are not allowed, so set comparison is
+    sufficient.)
+
+    Returns ``False`` when there is no related claim to compare against.
+    """
+    related = _related_claim(claim)
+    if related is None:
+        return False
+    return _item_code_set(claim) != _item_code_set(related)
+
+
 def _is_enhancement_claim(claim: Claim) -> bool:
     """
-    A pre-auth claim is treated as part of an *enhancement* chain if any of
-    its ancestors (via ``related[0].claim``) has a pre-auth response that was
-    approved or partially approved.
+    A pre-auth claim is treated as part of an *enhancement* chain if it (or one
+    of its ancestors via ``related[0].claim``) was submitted against an
+    approved/partially-approved pre-auth *with changed line items*.
+
+    Two conditions must both hold at the branch point:
+
+      * the parent pre-auth response was approved/partially approved, and
+      * the child's line-item codes differ from that parent
+        (``_is_item_enhancement``) — because an approved pre-auth can also be
+        *resubmitted* with the same items, which is not an enhancement.
 
     This is what disambiguates ``PREAUTH_QUERY_RESPONSE_SUBMITTED`` (19) from
-    ``ENHANCEMENT_QUERY_RESPONSE_SUBMITTED`` (131): the immediate parent of a
-    queried enhancement is itself ``queried``, so we must walk further back
-    until we either find an approved ancestor or run out of related claims.
+    ``ENHANCEMENT_QUERY_RESPONSE_SUBMITTED`` (131): a queried enhancement can be
+    queried again (``enhancement -> query -> query``), so the immediate parent
+    of a queried enhancement is itself ``queried``. We must walk further back
+    until we either reach an approved ancestor or run out of related claims.
     """
     if claim.use != ClaimUseChoices.PRE_AUTHORIZATION.value:
         return False
@@ -143,7 +193,9 @@ def _is_enhancement_claim(claim: Claim) -> bool:
         if parent.use != ClaimUseChoices.PRE_AUTHORIZATION.value:
             return False
         if _latest_response_status(parent) in APPROVED_RESPONSE_STATUSES:
-            return True
+            # Approved ancestor reached: it's an enhancement chain only if the
+            # items actually changed against it (otherwise it's a resubmission).
+            return _is_item_enhancement(current)
         current = parent
 
     return False
@@ -162,15 +214,14 @@ def _resolve_preauth_workflow(claim: Claim) -> WorkflowCode:
         return WorkflowCode.PREAUTH_QUERY_RESPONSE_SUBMITTED
 
     if related_status in APPROVED_RESPONSE_STATUSES:
-        return WorkflowCode.ENHANCEMENT_REQUEST_INITIATED
+        if _is_item_enhancement(claim):
+            return WorkflowCode.ENHANCEMENT_REQUEST_INITIATED
+        return WorkflowCode.PREAUTH_REQUEST_RESUBMITTED
 
     if related_status == REJECTED_RESPONSE_STATUS:
         return WorkflowCode.PREAUTH_REQUEST_RESUBMITTED
 
-    msg = (
-        "Cannot submit pre-auth: related claim is in "
-        f"'{related_status or 'pending'}' state."
-    )
+    msg = f"Cannot submit pre-auth: related claim is in '{related_status or 'pending'}' state."
     raise ValidationError(msg)
 
 
@@ -193,17 +244,18 @@ def _resolve_claim_workflow(claim: Claim) -> WorkflowCode:
         return WorkflowCode.CLAIM_REQUEST_RESUBMITTED
 
     if related_status in APPROVED_RESPONSE_STATUSES:
-        # An approved/partially-approved claim cannot be re-submitted via
-        # this endpoint — the provider has to raise a reprocess Task,
-        # which uses ``resolve_reprocess_workflow``.
-        raise ValidationError(
-            "Claim has already been approved — raise a reprocess request instead."
-        )
+        # An approved/partially-approved claim whose items changed is an
+        # enhancement, which cannot be re-submitted via this endpoint — the
+        # provider has to raise a reprocess Task (resolve_reprocess_workflow).
+        # When only amounts/stratification/implant changed it's a resubmission.
+        if _is_item_enhancement(claim):
+            raise ValidationError(
+                "Claim has already been approved and its items were changed — "
+                "raise a reprocess request instead."
+            )
+        return WorkflowCode.CLAIM_REQUEST_RESUBMITTED
 
-    msg = (
-        "Cannot submit claim: related claim is in "
-        f"'{related_status or 'pending'}' state."
-    )
+    msg = f"Cannot submit claim: related claim is in '{related_status or 'pending'}' state."
     raise ValidationError(msg)
 
 
