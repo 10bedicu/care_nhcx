@@ -82,6 +82,7 @@ from care.emr.resources.account.spec import (
     AccountStatusOptions,
 )
 from care.emr.resources.common.coding import Coding as CodingSpec
+from care.emr.resources.invoice.spec import InvoiceStatusOptions
 from care.facility.models import Facility as FacilityModel
 from care.users.models import User as UserModel
 from nhcx.models import DispatchStatusChoices
@@ -1474,7 +1475,6 @@ class Fhir:
         return abdm_fhir, set(self._profiles)
 
     def _claim_supplementary_entries(self, claim: ClaimModel) -> list[BundleEntry]:
-        return []
         if claim.use != "claim" or not claim.encounter:
             return []
 
@@ -1498,6 +1498,10 @@ class Fhir:
         if account:
             for invoice in InvoiceModel.objects.filter(
                 account=account,
+                status__in=[
+                    InvoiceStatusOptions.issued.value,
+                    InvoiceStatusOptions.balanced.value,
+                ],
             ).select_related(
                 "patient", "facility", "account", "account__primary_encounter"
             ):
