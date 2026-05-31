@@ -129,7 +129,12 @@ class ClaimViewSet(
                 biometric_auth_token,
             )
         elif claim.use == ClaimUseChoices.PRE_DETERMINATION:
-            dispatch(claim, GatewayService.predetermination__submit, encrypted_payload)
+            dispatch(
+                claim,
+                GatewayService.predetermination__submit,
+                encrypted_payload,
+                biometric_auth_token,
+            )
 
         return Response(
             ClaimRetrieveSpec.serialize(claim).model_dump(mode="json"),

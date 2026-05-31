@@ -47,6 +47,7 @@ from nhcx.specs.insurance_plan import (
 from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
+from nhcx.utils.swagger import pydantic_list
 
 
 class InsurancePlanFilter(filters.FilterSet):
@@ -168,14 +169,14 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
 
         return Response({"task_id": str(task.external_id)}, status=status.HTTP_200_OK)
 
-    @extend_schema(responses={200: InsurancePlanPlanSpec(many=True)})
+    @extend_schema(responses={200: pydantic_list(InsurancePlanPlanSpec)})
     @action(detail=True, methods=["GET"])
     def plans(self, request, *args, **kwargs):
         ip = self.get_object()
         plans = ip.plans.all().prefetch_related("general_costs", "benefits")
         return Response([InsurancePlanPlanSpec.serialize(p).to_json() for p in plans])
 
-    @extend_schema(responses={200: InsurancePlanCoverageSpec(many=True)})
+    @extend_schema(responses={200: pydantic_list(InsurancePlanCoverageSpec)})
     @action(detail=True, methods=["GET"])
     def coverages(self, request, *args, **kwargs):
         ip = self.get_object()
@@ -190,7 +191,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
         ip = self.get_object()
         return Response(_serialise_extensions_for(ip))
 
-    @extend_schema(responses={200: InsurancePlanQuestionnaireListSpec(many=True)})
+    @extend_schema(responses={200: pydantic_list(InsurancePlanQuestionnaireListSpec)})
     @action(detail=True, methods=["GET"])
     def questionnaires(self, request, *args, **kwargs):
         ip = self.get_object()
@@ -213,7 +214,7 @@ class InsurancePlanCoverageViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         coverage = self.get_object()
         return Response(_serialise_extensions_for(coverage))
 
-    @extend_schema(responses={200: InsurancePlanBenefitListSpec(many=True)})
+    @extend_schema(responses={200: pydantic_list(InsurancePlanBenefitListSpec)})
     @action(detail=True, methods=["GET"])
     def benefits(self, request, *args, **kwargs):
         coverage = self.get_object()
@@ -257,7 +258,7 @@ class InsurancePlanBenefitViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet
         benefit = self.get_object()
         return Response(_rolled_up_extensions_for_benefit(benefit))
 
-    @extend_schema(responses={200: ClaimSupportingInfoRequirementSpec(many=True)})
+    @extend_schema(responses={200: pydantic_list(ClaimSupportingInfoRequirementSpec)})
     @action(detail=True, methods=["GET"])
     def requirements(self, request, *args, **kwargs):
         benefit = self.get_object()
@@ -271,7 +272,7 @@ class InsurancePlanBenefitViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet
             _detach_questionnaire_lookup()
         return Response(payload)
 
-    @extend_schema(responses={200: InsurancePlanQuestionnaireListSpec(many=True)})
+    @extend_schema(responses={200: pydantic_list(InsurancePlanQuestionnaireListSpec)})
     @action(detail=True, methods=["GET"])
     def questionnaires(self, request, *args, **kwargs):
         benefit = self.get_object()
