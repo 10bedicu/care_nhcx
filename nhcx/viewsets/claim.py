@@ -15,7 +15,7 @@ from care.emr.api.viewsets.base import (
     EMRRetrieveMixin,
 )
 from nhcx.models.claim import Claim
-from nhcx.models.member_biometric_auth import MemberBiometricAuth
+from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
 from nhcx.models.task import Task, TaskUseCaseChoices
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.claim import (
@@ -107,12 +107,18 @@ class ClaimViewSet(
             workflow_id=workflow_code.value,
         )
 
-        biometric_auth = MemberBiometricAuth.objects.filter(
+        consent_stage = (
+            ClaimConsentStage.CLAIM
+            if claim.use == ClaimUseChoices.CLAIM
+            else ClaimConsentStage.PREAUTHORIZATION
+        )
+        claim_consent = ClaimConsent.objects.filter(
             encounter=claim.encounter,
             patient=claim.patient,
             payer_id=claim.insurer.get("participant_code"),
+            stage=consent_stage,
         ).first()
-        biometric_auth_token = biometric_auth.token if biometric_auth else None
+        biometric_auth_token = claim_consent.token if claim_consent else None
 
         if claim.use == ClaimUseChoices.CLAIM:
             dispatch(

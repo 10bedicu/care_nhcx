@@ -53,6 +53,7 @@ class AbhaBiometricAuthInitApiBody(AbhaBiometricAuthInitBody):
 
 class AbhaBiometricAuthVerifyApiBody(AbhaBiometricAuthVerifyBody):
     encounter: UUID4
+    stage: Literal["preauthorization", "claim"] = "preauthorization"
 
 
 class AbhaBiometricAuthRefreshBody(BaseModel):

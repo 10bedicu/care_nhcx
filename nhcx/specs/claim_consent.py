@@ -3,16 +3,17 @@ from datetime import datetime
 from pydantic import UUID4
 
 from care.emr.resources.base import EMRResource
-from nhcx.models.member_biometric_auth import MemberBiometricAuth
+from nhcx.models.claim_consent import ClaimConsent
 
 
-class MemberBiometricAuthRetrieveSpec(EMRResource):
-    __model__ = MemberBiometricAuth
+class ClaimConsentRetrieveSpec(EMRResource):
+    __model__ = ClaimConsent
     __exclude__ = ["encounter", "patient"]
 
     id: UUID4 | None = None
     created_date: datetime | None = None
     modified_date: datetime | None = None
+    stage: str
     payer_id: str
     encounter: UUID4 | None = None
     patient: UUID4 | None = None

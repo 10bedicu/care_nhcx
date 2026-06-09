@@ -2,6 +2,7 @@ from rest_framework.routers import DefaultRouter
 
 from nhcx.viewsets.callback import CallbackViewSet
 from nhcx.viewsets.claim import ClaimViewSet
+from nhcx.viewsets.claim_consent import ClaimConsentViewSet
 from nhcx.viewsets.communication import CommunicationViewSet
 from nhcx.viewsets.coverage_eligibility import CoverageEligibilityRequestViewSet
 from nhcx.viewsets.gateway import GatewayViewSet
@@ -11,7 +12,6 @@ from nhcx.viewsets.insurance_plan import (
     InsurancePlanQuestionnaireViewSet,
     InsurancePlanViewSet,
 )
-from nhcx.viewsets.member_biometric_auth import MemberBiometricAuthViewSet
 from nhcx.viewsets.payment import PaymentViewSet
 from nhcx.viewsets.provider import ProviderViewSet
 
@@ -44,9 +44,9 @@ router.register(
     basename="nhcx-insurance-plan-questionnaire",
 )
 router.register(
-    r"member-biometric-auth",
-    MemberBiometricAuthViewSet,
-    basename="nhcx-member-biometric-auth",
+    r"claim-consent",
+    ClaimConsentViewSet,
+    basename="nhcx-claim-consent",
 )
 
 

@@ -6,13 +6,13 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
-from nhcx.models.member_biometric_auth import MemberBiometricAuth
-from nhcx.specs.member_biometric_auth import MemberBiometricAuthRetrieveSpec
+from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
+from nhcx.specs.claim_consent import ClaimConsentRetrieveSpec
 
 
-class MemberBiometricAuthViewSet(EMRRetrieveMixin, EMRBaseViewSet):
-    database_model = MemberBiometricAuth
-    pydantic_retrieve_model = MemberBiometricAuthRetrieveSpec
+class ClaimConsentViewSet(EMRRetrieveMixin, EMRBaseViewSet):
+    database_model = ClaimConsent
+    pydantic_retrieve_model = ClaimConsentRetrieveSpec
 
     def get_queryset(self):
         return (
@@ -36,13 +36,21 @@ class MemberBiometricAuthViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 location=OpenApiParameter.QUERY,
                 required=True,
             ),
+            OpenApiParameter(
+                name="stage",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=[stage.value for stage in ClaimConsentStage],
+            ),
         ],
-        responses={200: MemberBiometricAuthRetrieveSpec},
+        responses={200: ClaimConsentRetrieveSpec},
     )
     def lookup(self, request, *args, **kwargs):
         params = request.query_params
         payer_id = params.get("payer_id")
         encounter_id = params.get("encounter_id")
+        stage = params.get("stage", ClaimConsentStage.PREAUTHORIZATION.value)
         if not payer_id or not encounter_id:
             raise ValidationError(
                 "Query parameters payerId and encounterId are required "
@@ -53,6 +61,7 @@ class MemberBiometricAuthViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             self.get_queryset(),
             payer_id=payer_id,
             encounter__external_id=encounter_id,
+            stage=stage,
         )
         self.authorize_retrieve(instance)
         data = (

@@ -4,7 +4,7 @@ from typing import Any
 from abdm.service.request import Request
 from rest_framework import status
 
-from nhcx.models.member_biometric_auth import MemberBiometricAuth
+from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
 from nhcx.services.types.gateway import (
     AbhaBiometricAuthInitBody,
     AbhaBiometricAuthInitResponse,
@@ -279,22 +279,27 @@ class GatewayService:
 
     @staticmethod
     def abha__biometric__auth__refresh_member_token(
-        member_biometric_auth: MemberBiometricAuth,
-    ) -> MemberBiometricAuth:
+        claim_consent: ClaimConsent,
+    ) -> ClaimConsent:
+        process = (
+            "Discharge"
+            if claim_consent.stage == ClaimConsentStage.CLAIM
+            else "Preauth"
+        )
         refresh_response = GatewayService.abha__biometric__auth__refresh(
             AbhaBiometricAuthRefreshBody(
-                process=member_biometric_auth.process,
-                payerId=member_biometric_auth.payer_id,
-                refreshToken=member_biometric_auth.refresh_token,
+                process=process,
+                payerId=claim_consent.payer_id,
+                refreshToken=claim_consent.refresh_token,
             )
         )
 
-        member_biometric_auth.token = refresh_response.token
-        member_biometric_auth.expires_in = refresh_response.expiresIn
-        member_biometric_auth.refresh_token = refresh_response.refreshToken
-        member_biometric_auth.refresh_expires_in = refresh_response.refreshExpiresIn
-        member_biometric_auth.save()
-        return member_biometric_auth
+        claim_consent.token = refresh_response.token
+        claim_consent.expires_in = refresh_response.expiresIn
+        claim_consent.refresh_token = refresh_response.refreshToken
+        claim_consent.refresh_expires_in = refresh_response.refreshExpiresIn
+        claim_consent.save()
+        return claim_consent
 
     @staticmethod
     def abha__biometric__auth__refresh(

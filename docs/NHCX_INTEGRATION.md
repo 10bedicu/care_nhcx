@@ -136,7 +136,7 @@ care_nhcx/nhcx/
 │   ├── communication.py     #   reply to payer queries
 │   ├── payment.py           #   acknowledge payment notices
 │   ├── insurance_plan.py    #   request + browse insurance plan catalogue
-│   ├── member_biometric_auth.py
+│   ├── claim_consent.py
 │   ├── gateway.py           #   policies lookup + ABHA biometric auth
 │   ├── provider.py          #   facility <-> NHCX participant registration
 │   └── callback.py          #   PUBLIC inbound webhooks (no auth)
@@ -148,7 +148,7 @@ care_nhcx/nhcx/
 │   ├── task.py              #   Task (cancel/reprocess/communication/payment/plan)
 │   ├── communication.py / payment.py
 │   ├── insurance_plan.py    #   Full FHIR InsurancePlan relational tree
-│   ├── member_biometric_auth.py
+│   ├── claim_consent.py
 │   ├── inbound_envelope.py  #   NHCXInboundEnvelope (callback inbox)
 │   └── __init__.py          #   DispatchStatusChoices
 │
@@ -433,7 +433,7 @@ The source rows remain reachable through `coverage`, `specific_cost_benefit`, an
 
 ### 3.9 Member biometric authentication
 
-Some PMJAY flows require the beneficiary to authenticate biometrically (fingerprint, iris, or face) before a pre-authorization or claim is accepted. `GatewayService.abha__biometric__auth__init/verify/refresh` wrap the ABHA biometric APIs. On success a `MemberBiometricAuth` row (token and refresh token, scoped to `encounter` plus `payer_id`) is stored and its `token` is sent as the `X-User-Token` header on the subsequent pre-authorization or claim submission.
+Some PMJAY flows require the beneficiary to authenticate biometrically (fingerprint, iris, or face) before a pre-authorization or claim is accepted. `GatewayService.abha__biometric__auth__init/verify/refresh` wrap the ABHA biometric APIs. On success a `ClaimConsent` row (token and refresh token, scoped to `encounter`, `payer_id`, and `stage`) is stored and its `token` is sent as the `X-User-Token` header on the subsequent pre-authorization or claim submission.
 
 ### 3.10 Configuration and settings
 
@@ -576,9 +576,9 @@ The durable callback inbox, central to the asynchronous pipeline in [section 2.4
 | `recipient_code` | The participant the payload was addressed to, used to pick the decryption key. |
 | `status`, `attempts`, `error_message`, `processed_at` | Processing state. Quirk: `failed` envelopes are intentionally never deduped, so operators can fix and replay them; the `mark_processing` / `mark_completed` / `mark_failed` helpers drive these transitions. |
 
-#### MemberBiometricAuth
+#### ClaimConsent
 
-The biometric token issued for a `(encounter, payer_id)` pair. `encounter` is a one-to-one link, so an encounter holds at most one biometric authorization at a time. It stores the `token` and `refresh_token` (with their `expires_in` / `refresh_expires_in` lifetimes) and the `accounts` returned by the ABHA biometric API. The `token` is attached as `X-User-Token` on the next pre-authorization or claim submission.
+The biometric consent token issued for an `(encounter, payer_id, stage)` triple, where `stage` is either `preauthorization` or `claim`. A unique constraint on `(encounter, stage)` allows an encounter to hold at most one consent per stage. It stores the `token` and `refresh_token` (with their `expires_in` / `refresh_expires_in` lifetimes) and the `accounts` returned by the ABHA biometric API. The `token` is attached as `X-User-Token` on the next pre-authorization or claim submission.
 
 #### Entity relationships
 
@@ -848,7 +848,7 @@ These are present in the current code and worth tracking operationally:
 - **`_claim_supplementary_entries` is disabled:** it returns an empty list immediately (ABDM discharge, outpatient-consult, and invoice compositions are not currently attached to claim bundles).
 - **Outstanding work items** in `Fhir.process_*` note that responses are created with `Model.objects.create(...)` rather than through their pydantic specifications.
 - **Certificate fetching is uncached** (`ParticipantService.fetch_certs` has an outstanding item to cache); each encryption currently fetches the recipient certificate.
-- **`MemberBiometricAuth.lookup`** reads `payer_id` and `encounter_id` from query parameters while the `@extend_schema` advertises `payerId` and `encounterId`; align the parameter names.
+- **`ClaimConsent.lookup`** reads `payer_id` and `encounter_id` from query parameters while the `@extend_schema` advertises `payerId` and `encounterId`; align the parameter names.
 
 ---
 

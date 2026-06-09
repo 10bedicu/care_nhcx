@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet
 from care.emr.models import Encounter
-from nhcx.models.member_biometric_auth import MemberBiometricAuth
+from nhcx.models.claim_consent import ClaimConsent
 from nhcx.services.gateway import GatewayService
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.gateway import (
@@ -59,16 +59,18 @@ class GatewayViewSet(EMRBaseViewSet):
         body = AbhaBiometricAuthVerifyApiBody(**request.data)
         encounter = get_object_or_404(Encounter, external_id=body.encounter)
         service_body = AbhaBiometricAuthVerifyBody(
-            **body.model_dump(exclude={"encounter"})
+            **body.model_dump(exclude={"encounter", "stage"})
         )
         verify_response = GatewayService.abha__biometric__auth__verify(service_body)
         accounts = [a.model_dump(mode="json") for a in verify_response.accounts]
-        MemberBiometricAuth.objects.update_or_create(
+        ClaimConsent.objects.update_or_create(
             encounter=encounter,
             payer_id=body.payerId,
+            stage=body.stage,
             defaults={
                 "encounter": encounter,
                 "payer_id": body.payerId,
+                "stage": body.stage,
                 "patient": encounter.patient,
                 "token": verify_response.token,
                 "expires_in": verify_response.expiresIn,
