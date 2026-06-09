@@ -108,12 +108,14 @@ def _enqueue_callback(
         protocol_status=ProtocolStatusChoices.REQUEST_QUEUED,
     ).model_dump()
 
-    # Idempotency: same gateway correlation already in-flight/done? ack and exit.
+    # Dedupe on callback_type, correlation_id, and api_call_id
     if (
         correlation_id
+        and api_call_id
         and NHCXInboundEnvelope.objects.filter(
             callback_type=callback_type,
             correlation_id=correlation_id,
+            api_call_id=api_call_id,
             status__in=_DEDUPE_STATUSES,
         ).exists()
     ):
