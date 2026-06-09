@@ -7,3 +7,6 @@ PLUGIN_NAME = "nhcx"
 class NHCXConfig(AppConfig):
     name = PLUGIN_NAME
     verbose_name = _("NHCX")
+
+    def ready(self):
+        import nhcx.permissions.claim_consent  # noqa: F401
