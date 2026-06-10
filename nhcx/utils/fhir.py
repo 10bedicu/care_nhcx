@@ -6,9 +6,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from abdm.utils.fhir.fhir import Fhir as AbdmFhir
-from django.db import models, transaction
-from django.db.models import Q, Value
-from django.db.models.functions import Replace
+from django.db import transaction
 from fhir.resources.R4B.address import Address
 from fhir.resources.R4B.attachment import Attachment
 from fhir.resources.R4B.bundle import Bundle, BundleEntry
@@ -65,7 +63,7 @@ from fhir.resources.R4B.questionnaireresponse import (
 from fhir.resources.R4B.reference import Reference
 from fhir.resources.R4B.resource import Resource
 from fhir.resources.R4B.task import Task, TaskInput, TaskOutput
-from pydantic import UUID4, BaseModel
+from pydantic import UUID4, BaseModel, ConfigDict
 
 from care.emr.models.account import Account as AccountModel
 from care.emr.models.base import EMRBaseModel
@@ -343,48 +341,8 @@ class Fhir:
         )
 
     @cache_profiles(Organization.get_resource_type())
-    def _organization(self, facility: FacilityModel):
+    def _payer_organization(self, facility: FacilityModel):
         id = str(facility.external_id)
-
-        if facility.name == "SHA HP":
-            return Organization(
-                id=id,
-                meta={
-                    "profile": [
-                        "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
-                    ]
-                },
-                identifier=[
-                    # FIXME: remove this once we have a real identifier
-                    {
-                        "type": {
-                            "coding": [
-                                {
-                                    "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
-                                    "code": "NIIP",
-                                    "display": "National Insurance Payor Identifier (Payor)",
-                                }
-                            ]
-                        },
-                        "system": "https://facility.abdm.gov.in",
-                        "value": "1518",
-                    }
-                ],
-                active=True,
-                type=[
-                    {
-                        "coding": [
-                            {
-                                "system": "http://terminology.hl7.org/CodeSystem/organization-type",
-                                "code": "pay",
-                                "display": "Payer",
-                            }
-                        ]
-                    }
-                ],
-                name="SHA HP",
-                contact=[{"telecom": [{"system": "phone", "value": "8272905341"}]}],
-            )
 
         return Organization(
             id=id,
@@ -394,22 +352,70 @@ class Fhir:
                 ],
             ),
             identifier=[
-                # FIXME: add health facility id
-                # {
-                #         "type": {
-                #             "coding": [
-                #                 {
-                #                     "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
-                #                     "code": "NPI",
-                #                     "display": "National provider identifier",
-                #                 }
-                #             ]
-                #         },
-                #         "system": "https://facility.abdm.gov.in",
-                #         "value": "IN1910000151",
-                #     }
                 Identifier(
-                    # FIXME: remove this once we have a real identifier
+                    type=CodeableConcept(
+                        coding=[
+                            Coding(
+                                system="http://terminology.hl7.org/CodeSystem/v2-0203",
+                                code="NIIP",
+                                display="National Insurance Payor Identifier (Payor)",
+                            )
+                        ]
+                    ),
+                    system="https://facility.abdm.gov.in",
+                    value=str(facility.id),
+                )
+            ],
+            active=True,
+            type=[
+                CodeableConcept(
+                    coding=[
+                        Coding(
+                            system="http://terminology.hl7.org/CodeSystem/organization-type",
+                            code="pay",
+                            display="Payer",
+                        )
+                    ]
+                )
+            ],
+            name=facility.name,
+            telecom=[
+                *(
+                    [ContactPoint(system="phone", value=facility.phone_number)]
+                    if facility.phone_number
+                    else []
+                )
+            ],
+            address=(
+                [
+                    Address(
+                        line=[facility.address],
+                        postalCode=facility.pincode,
+                        country="IN",
+                    )
+                ]
+                if facility.address
+                else None
+            ),
+        )
+
+    @cache_profiles(Organization.get_resource_type())
+    def _provider_organization(self, facility: FacilityModel):
+        id = str(facility.external_id)
+        health_facility = getattr(facility, "healthfacility", None)
+
+        if not health_facility:
+            raise AttributeError("Health facility attribute is missing")
+
+        return Organization(
+            id=id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"
+                ],
+            ),
+            identifier=[
+                Identifier(
                     type=CodeableConcept(
                         coding=[
                             Coding(
@@ -420,11 +426,11 @@ class Fhir:
                         ]
                     ),
                     system="https://facility.abdm.gov.in",
-                    value="IN2910001986",
+                    value=health_facility.hf_id,
                 ),
                 Identifier(
                     system="https://facility.abdm.gov.in",
-                    value="IN2910001986",
+                    value=health_facility.hf_id,
                     type=CodeableConcept(
                         coding=[
                             Coding(
@@ -559,20 +565,21 @@ class Fhir:
 
         return CodeableConcept(coding=[self._coding(coding)])
 
-    def _participant_to_organization(self, participant: Participant):
+    def _participant_to_payer_organization(self, participant: Participant):
         if participant.participant_id not in self._participants_external_id_map:
             self._participants_external_id_map[participant.participant_id] = uuid4()
 
         id = str(self._participants_external_id_map[participant.participant_id])
 
-        # FIXME: expand this
-        return self._organization(
-            FacilityModel(
-                external_id=id,
-                id=participant.participant_id,
-                name=participant.participant_name,
-            )
+        facility = FacilityModel(
+            external_id=id,
+            id=participant.participant_code.strip("@hcx"),
+            name=participant.participant_name,
+            address=participant.address or None,
+            phone_number=f"+91{participant.primary_mobile}",
         )
+
+        return self._payer_organization(facility)
 
     @cache_profiles(DocumentReference.get_resource_type())
     def _document_reference(self, file: FileUploadModel):
@@ -600,9 +607,12 @@ class Fhir:
         )
 
     class CoverageModel(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+
         external_id: UUID4
         policy: Policy
         insurer: Participant
+        patient: PatientModel
 
     @cache_profiles(Coverage.get_resource_type())
     def _coverage(self, coverage: CoverageModel):
@@ -630,30 +640,9 @@ class Fhir:
                 )
             ],
             subscriberId=coverage.policy.memberid,
-            beneficiary=self._reference(
-                self._patient(
-                    PatientModel.objects.annotate(
-                        abha_number_parsed=Replace(
-                            "abha_number__abha_number",
-                            Value("-"),
-                            Value(""),
-                            output_field=models.CharField(),
-                        )
-                    )
-                    .filter(
-                        Q(
-                            abha_number_parsed=coverage.policy.abhanumber.replace(
-                                "-", ""
-                            )
-                        )
-                        | Q(abha_number__mobile=coverage.policy.mobilenumber)
-                        | Q(external_id="2b970012-eb54-4fb1-a670-1d053c9513cd")
-                    )
-                    .first()
-                )
-            ),
+            beneficiary=self._reference(self._patient(coverage.patient)),
             payor=[
-                self._reference(self._participant_to_organization(coverage.insurer))
+                self._reference(self._participant_to_payer_organization(coverage.insurer))
             ],
             status="active",
             period=self._ist_period(
@@ -732,13 +721,20 @@ class Fhir:
             else None,
         )
 
-    def _policy_to_coverage(self, policy: Policy, insurer: Participant):
+    def _policy_to_coverage(
+        self, policy: Policy, insurer: Participant, patient: PatientModel
+    ):
         if policy.sno not in self._policies_external_id_map:
             self._policies_external_id_map[policy.sno] = uuid4()
 
         external_id = self._policies_external_id_map[policy.sno]
         return self._coverage(
-            self.CoverageModel(external_id=external_id, policy=policy, insurer=insurer)
+            self.CoverageModel(
+                external_id=external_id,
+                policy=policy,
+                insurer=insurer,
+                patient=patient,
+            )
         )
 
     def _coverage_eligibility_request(self, request: CoverageEligibilityRequestModel):
@@ -763,9 +759,11 @@ class Fhir:
             created=self._to_ist(request.created_date),
             patient=self._reference(self._patient(request.patient)),
             enterer=self._reference(self._practitioner(request.created_by)),
-            provider=self._reference(self._organization(request.provider.facility)),
+            provider=self._reference(
+                self._provider_organization(request.provider.facility)
+            ),
             insurer=self._reference(
-                self._participant_to_organization(Participant(**request.insurer))
+                self._participant_to_payer_organization(Participant(**request.insurer))
             ),
             facility=self._reference(
                 self._location(
@@ -806,6 +804,7 @@ class Fhir:
                         self._policy_to_coverage(
                             Policy(**insurance.get("policy")),
                             Participant(**request.insurer),
+                            request.patient,
                         )
                     ),
                 )
@@ -824,20 +823,26 @@ class Fhir:
                     unitPrice=Money(value=item.get("unit_price"), currency="INR"),
                     diagnosis=[
                         CoverageEligibilityRequestItemDiagnosis(
-                            diagnosisReference=self._reference(
-                                self._condition(
-                                    ConditionModel.objects.filter(
-                                        external_id=diagnosis.get("diagnosis_reference")
-                                    ).first()
+                            diagnosisReference=(
+                                self._reference(
+                                    self._condition(
+                                        ConditionModel.objects.filter(
+                                            external_id=diagnosis.get(
+                                                "diagnosis_reference"
+                                            )
+                                        ).first()
+                                    )
                                 )
-                            )
-                            if diagnosis.get("diagnosis_reference")
-                            else None,
-                            diagnosisCodeableConcept=self._coding_to_codable_concept(
-                                CodingSpec(**diagnosis.get("diagnosis_code"))
-                            )
-                            if not diagnosis.get("diagnosis_reference")
-                            else None,
+                                if diagnosis.get("diagnosis_reference")
+                                else None
+                            ),
+                            diagnosisCodeableConcept=(
+                                self._coding_to_codable_concept(
+                                    CodingSpec(**diagnosis.get("diagnosis_code"))
+                                )
+                                if not diagnosis.get("diagnosis_reference")
+                                else None
+                            ),
                         )
                         for diagnosis in item.get("diagnosis") or []
                     ],
@@ -1044,14 +1049,16 @@ class Fhir:
                 )
             ),
             created=self._to_ist(claim.created_date),
-            billablePeriod=Period(**claim.billable_period)
-            if claim.billable_period
-            else None,
+            billablePeriod=(
+                Period(**claim.billable_period) if claim.billable_period else None
+            ),
             patient=self._reference(self._patient(claim.patient)),
             enterer=self._reference(self._practitioner(claim.created_by)),
-            provider=self._reference(self._organization(claim.provider.facility)),
+            provider=self._reference(
+                self._provider_organization(claim.provider.facility)
+            ),
             insurer=self._reference(
-                self._participant_to_organization(Participant(**claim.insurer))
+                self._participant_to_payer_organization(Participant(**claim.insurer))
             ),
             insurance=[
                 ClaimInsurance(
@@ -1061,6 +1068,7 @@ class Fhir:
                         self._policy_to_coverage(
                             Policy(**insurance.get("policy")),
                             Participant(**claim.insurer),
+                            claim.patient,
                         )
                     ),
                     preAuthRef=_related_pre_auth_refs or None,
@@ -1076,124 +1084,158 @@ class Fhir:
                         )
                     ],
                 ),
-                party=self._reference(self._organization(claim.provider.facility)),
+                party=self._reference(
+                    self._provider_organization(claim.provider.facility)
+                ),
             ),
-            related=[
-                ClaimRelated(
-                    claim=self._reference(
-                        self._claim(
-                            ClaimModel.objects.filter(
-                                external_id=related.get("claim")
-                            ).first()
-                        )
-                    ),
-                    relationship=self._coding_to_codable_concept(
-                        CodingSpec(**related.get("relationship"))
+            related=(
+                [
+                    ClaimRelated(
+                        claim=self._reference(
+                            self._claim(
+                                ClaimModel.objects.filter(
+                                    external_id=related.get("claim")
+                                ).first()
+                            )
+                        ),
+                        relationship=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(**related.get("relationship"))
+                            )
+                            if related.get("relationship")
+                            else None
+                        ),
+                        reference=(
+                            Identifier(value=related.get("reference"))
+                            if related.get("reference")
+                            else None
+                        ),
                     )
-                    if related.get("relationship")
-                    else None,
-                    reference=Identifier(value=related.get("reference"))
-                    if related.get("reference")
-                    else None,
-                )
-                for related in claim.related
-            ]
-            if claim.related
-            else None,
-            careTeam=[
-                ClaimCareTeam(
-                    sequence=care_team.get("sequence"),
-                    provider=self._reference(
-                        self._practitioner(
-                            UserModel.objects.filter(
-                                external_id=care_team.get("provider")
-                            ).first()
-                        )
-                    ),
-                    responsible=care_team.get("responsible"),
-                    role=self._coding_to_codable_concept(
-                        CodingSpec(**care_team.get("role"))
+                    for related in claim.related
+                ]
+                if claim.related
+                else None
+            ),
+            careTeam=(
+                [
+                    ClaimCareTeam(
+                        sequence=care_team.get("sequence"),
+                        provider=self._reference(
+                            self._practitioner(
+                                UserModel.objects.filter(
+                                    external_id=care_team.get("provider")
+                                ).first()
+                            )
+                        ),
+                        responsible=care_team.get("responsible"),
+                        role=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(**care_team.get("role"))
+                            )
+                            if care_team.get("role")
+                            else None
+                        ),
                     )
-                    if care_team.get("role")
-                    else None,
-                )
-                for care_team in claim.care_team
-            ]
-            if claim.care_team
-            else [
-                ClaimCareTeam(
-                    sequence=1,
-                    provider=self._reference(
-                        self._organization(claim.provider.facility)
-                    ),
-                    responsible=True,
-                )
-            ],
-            diagnosis=[
-                ClaimDiagnosis(
-                    sequence=diagnosis.get("sequence"),
-                    type=[
-                        self._coding_to_codable_concept(CodingSpec(**diagnosis_type))
-                        for diagnosis_type in diagnosis.get("type")
-                    ]
-                    if diagnosis.get("type")
-                    else None,
-                    diagnosisReference=self._reference(
-                        self._condition(
-                            ConditionModel.objects.filter(
-                                external_id=diagnosis.get("diagnosis_reference")
-                            ).first()
-                        )
+                    for care_team in claim.care_team
+                ]
+                if claim.care_team
+                else [
+                    ClaimCareTeam(
+                        sequence=1,
+                        provider=self._reference(
+                            self._provider_organization(claim.provider.facility)
+                        ),
+                        responsible=True,
                     )
-                    if diagnosis.get("diagnosis_reference")
-                    else None,
-                    diagnosisCodeableConcept=self._coding_to_codable_concept(
-                        CodingSpec(**diagnosis.get("diagnosis_code"))
+                ]
+            ),
+            diagnosis=(
+                [
+                    ClaimDiagnosis(
+                        sequence=diagnosis.get("sequence"),
+                        type=(
+                            [
+                                self._coding_to_codable_concept(
+                                    CodingSpec(**diagnosis_type)
+                                )
+                                for diagnosis_type in diagnosis.get("type")
+                            ]
+                            if diagnosis.get("type")
+                            else None
+                        ),
+                        diagnosisReference=(
+                            self._reference(
+                                self._condition(
+                                    ConditionModel.objects.filter(
+                                        external_id=diagnosis.get("diagnosis_reference")
+                                    ).first()
+                                )
+                            )
+                            if diagnosis.get("diagnosis_reference")
+                            else None
+                        ),
+                        diagnosisCodeableConcept=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(**diagnosis.get("diagnosis_code"))
+                            )
+                            if not diagnosis.get("diagnosis_reference")
+                            else None
+                        ),
+                        onAdmission=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(
+                                    system="http://terminology.hl7.org/CodeSystem/ex-diagnosis-on-admission",
+                                    code=diagnosis.get("on_admission"),
+                                )
+                            )
+                            if diagnosis.get("on_admission")
+                            else None
+                        ),
                     )
-                    if not diagnosis.get("diagnosis_reference")
-                    else None,
-                    onAdmission=self._coding_to_codable_concept(
-                        CodingSpec(
-                            system="http://terminology.hl7.org/CodeSystem/ex-diagnosis-on-admission",
-                            code=diagnosis.get("on_admission"),
-                        )
+                    for diagnosis in claim.diagnosis
+                ]
+                if claim.diagnosis
+                else None
+            ),
+            procedure=(
+                [
+                    ClaimProcedure(
+                        sequence=procedure.get("sequence"),
+                        type=(
+                            [
+                                self._coding_to_codable_concept(
+                                    CodingSpec(**procedure_type)
+                                )
+                                for procedure_type in procedure.get("type")
+                            ]
+                            if procedure.get("type")
+                            else None
+                        ),
+                        procedureReference=(
+                            self._reference(
+                                self._condition(
+                                    ConditionModel.objects.filter(
+                                        external_id=procedure.get("procedure_reference")
+                                    ).first()
+                                )
+                            )
+                            if procedure.get("procedure_reference")
+                            else None
+                        ),
+                        procedureCodeableConcept=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(**procedure.get("procedure_code"))
+                            )
+                            if not procedure.get("procedure_reference")
+                            else None
+                        ),
+                        date=procedure.get("date") if procedure.get("date") else None,
                     )
-                    if diagnosis.get("on_admission")
-                    else None,
-                )
-                for diagnosis in claim.diagnosis
-            ]
-            if claim.diagnosis
-            else None,
-            procedure=[
-                ClaimProcedure(
-                    sequence=procedure.get("sequence"),
-                    type=[
-                        self._coding_to_codable_concept(CodingSpec(**procedure_type))
-                        for procedure_type in procedure.get("type")
-                    ]
-                    if procedure.get("type")
-                    else None,
-                    procedureReference=self._reference(
-                        self._condition(
-                            ConditionModel.objects.filter(
-                                external_id=procedure.get("procedure_reference")
-                            ).first()
-                        )
-                    )
-                    if procedure.get("procedure_reference")
-                    else None,
-                    procedureCodeableConcept=self._coding_to_codable_concept(
-                        CodingSpec(**procedure.get("procedure_code"))
-                    )
-                    if not procedure.get("procedure_reference")
-                    else None,
-                    date=procedure.get("date") if procedure.get("date") else None,
-                )
-                for procedure in claim.procedure
-            ]
-            if claim.procedure
-            else None,
+                    for procedure in claim.procedure
+                ]
+                if claim.procedure
+                else None
+            ),
             supportingInfo=(
                 [
                     ClaimSupportingInfo(
@@ -1204,18 +1246,22 @@ class Fhir:
                         code=self._coding_to_codable_concept(
                             CodingSpec(**supporting_info.get("code"))
                         ),
-                        timingPeriod=Period(**supporting_info.get("timing"))
-                        if supporting_info.get("timing")
-                        else None,
+                        timingPeriod=(
+                            Period(**supporting_info.get("timing"))
+                            if supporting_info.get("timing")
+                            else None
+                        ),
                         valueString=supporting_info.get("value_string"),
-                        valueAttachment=self._attachment(si_file)
-                        if supporting_info.get("value_attachment")
-                        and (
-                            si_file := FileUpload.objects.filter(
-                                external_id=supporting_info.get("value_attachment")
-                            ).first()
-                        )
-                        else None,
+                        valueAttachment=(
+                            self._attachment(si_file)
+                            if supporting_info.get("value_attachment")
+                            and (
+                                si_file := FileUpload.objects.filter(
+                                    external_id=supporting_info.get("value_attachment")
+                                ).first()
+                            )
+                            else None
+                        ),
                     )
                     for supporting_info in claim.supporting_info
                 ]
@@ -1326,70 +1372,86 @@ class Fhir:
                 else []
             )
             or None,
-            item=[
-                ClaimItem(
-                    id=f"item-{item.get('sequence')}",
-                    sequence=item.get("sequence"),
-                    careTeamSequence=item.get("care_team_sequence"),
-                    diagnosisSequence=item.get("diagnosis_sequence"),
-                    procedureSequence=item.get("procedure_sequence"),
-                    informationSequence=item.get("information_sequence"),
-                    category=self._coding_to_codable_concept(
-                        CodingSpec(**item.get("category"))
-                    )
-                    if item.get("category")
-                    else None,
-                    productOrService=self._coding_to_codable_concept(
-                        CodingSpec(**item.get("product_or_service"))
-                    )
-                    if item.get("product_or_service")
-                    else None,
-                    modifier=[
-                        self._coding_to_codable_concept(CodingSpec(**modifier))
-                        for modifier in item.get("modifier", [])
-                    ]
-                    or None,
-                    programCode=[
-                        self._coding_to_codable_concept(CodingSpec(**program_code))
-                        for program_code in item.get("program_code")
-                    ]
-                    if item.get("program_code")
-                    else None,
-                    servicedPeriod=self._ist_period(
-                        item.get("serviced_period", {}).get("start"),
-                        item.get("serviced_period", {}).get("end"),
-                    ),
-                    unitPrice=Money(
-                        value=item.get("unit_price"),
-                        currency="INR",
-                    )
-                    if item.get("unit_price")
-                    else None,
-                    quantity=Quantity(
-                        value=item.get("quantity", {}).get("value"),
-                        unit=item.get("quantity", {})
-                        .get("unit", {})
-                        .get("display", "1*"),
-                        system=item.get("quantity", {})
-                        .get("unit", {})
-                        .get("system", "http://unitsofmeasure.org"),
-                        code=item.get("quantity", {}).get("unit", {}).get("code", "1"),
-                    )
-                    if item.get("quantity")
-                    else None,
-                    net=Money(
-                        value=(
-                            float(item.get("unit_price", 0))
-                            * float(item.get("quantity", {}).get("value", 1))
+            item=(
+                [
+                    ClaimItem(
+                        id=f"item-{item.get('sequence')}",
+                        sequence=item.get("sequence"),
+                        careTeamSequence=item.get("care_team_sequence"),
+                        diagnosisSequence=item.get("diagnosis_sequence"),
+                        procedureSequence=item.get("procedure_sequence"),
+                        informationSequence=item.get("information_sequence"),
+                        category=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(**item.get("category"))
+                            )
+                            if item.get("category")
+                            else None
                         ),
-                        currency="INR",
-                    ),
-                    factor=item.get("factor"),
-                )
-                for item in claim.item
-            ]
-            if claim.item
-            else None,
+                        productOrService=(
+                            self._coding_to_codable_concept(
+                                CodingSpec(**item.get("product_or_service"))
+                            )
+                            if item.get("product_or_service")
+                            else None
+                        ),
+                        modifier=[
+                            self._coding_to_codable_concept(CodingSpec(**modifier))
+                            for modifier in item.get("modifier", [])
+                        ]
+                        or None,
+                        programCode=(
+                            [
+                                self._coding_to_codable_concept(
+                                    CodingSpec(**program_code)
+                                )
+                                for program_code in item.get("program_code")
+                            ]
+                            if item.get("program_code")
+                            else None
+                        ),
+                        servicedPeriod=self._ist_period(
+                            item.get("serviced_period", {}).get("start"),
+                            item.get("serviced_period", {}).get("end"),
+                        ),
+                        unitPrice=(
+                            Money(
+                                value=item.get("unit_price"),
+                                currency="INR",
+                            )
+                            if item.get("unit_price")
+                            else None
+                        ),
+                        quantity=(
+                            Quantity(
+                                value=item.get("quantity", {}).get("value"),
+                                unit=item.get("quantity", {})
+                                .get("unit", {})
+                                .get("display", "1*"),
+                                system=item.get("quantity", {})
+                                .get("unit", {})
+                                .get("system", "http://unitsofmeasure.org"),
+                                code=item.get("quantity", {})
+                                .get("unit", {})
+                                .get("code", "1"),
+                            )
+                            if item.get("quantity")
+                            else None
+                        ),
+                        net=Money(
+                            value=(
+                                float(item.get("unit_price", 0))
+                                * float(item.get("quantity", {}).get("value", 1))
+                            ),
+                            currency="INR",
+                        ),
+                        factor=item.get("factor"),
+                    )
+                    for item in claim.item
+                ]
+                if claim.item
+                else None
+            ),
             total=Money(
                 value=(
                     sum(
