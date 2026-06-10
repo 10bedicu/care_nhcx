@@ -9,4 +9,5 @@ class NHCXConfig(AppConfig):
     verbose_name = _("NHCX")
 
     def ready(self):
+        import nhcx.extensions  # noqa: F401
         import nhcx.permissions.claim_consent  # noqa: F401
