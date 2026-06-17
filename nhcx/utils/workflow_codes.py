@@ -15,7 +15,7 @@ The catalogue (per the NHCX spec):
     131  ENHANCEMENT_QUERY_RESPONSE_SUBMITTED   Reply to a payer enhancement query
     15   CLAIM_REQUEST_INITIATED                Final claim submission
     16   CLAIM_REQUEST_RESUBMITTED              Resubmit a rejected claim
-    151  CLAIM_QUERY_RESPONSE_SUBMITTED         Reply to a payer claim query
+    161  CLAIM_QUERY_RESPONSE_SUBMITTED         Reply to a payer claim query
     17   PAYMENT_RECEIVED                       Acknowledge payment notice
     18   REPROCESS_REQUEST_SUBMITTED            Raise reprocess request
 
@@ -65,7 +65,7 @@ class WorkflowCode(StrEnum):
     ENHANCEMENT_QUERY_RESPONSE_SUBMITTED = "131"
     CLAIM_REQUEST_INITIATED = "15"
     CLAIM_REQUEST_RESUBMITTED = "16"
-    CLAIM_QUERY_RESPONSE_SUBMITTED = "151"
+    CLAIM_QUERY_RESPONSE_SUBMITTED = "161"
     PAYMENT_RECEIVED = "17"
     REPROCESS_REQUEST_SUBMITTED = "18"
 
