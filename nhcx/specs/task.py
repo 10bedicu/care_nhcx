@@ -6,14 +6,14 @@ from care.emr.resources.base import EMRResource
 from care.emr.resources.user.spec import UserSpec
 from nhcx.models.communication import Communication, CommunicationRequest
 from nhcx.models.insurance_plan import InsurancePlan
-from nhcx.models.payment import PaymentReconciliation
+from nhcx.models.payment import PaymentNotice
 from nhcx.models.task import Task
 from nhcx.specs.communication import (
     CommunicationRequestRetrieveSpec,
     CommunicationRetrieveSpec,
 )
 from nhcx.specs.insurance_plan import InsurancePlanRetrieveSpec
-from nhcx.specs.payment import PaymentReconciliationRetrieveSpec
+from nhcx.specs.payment import PaymentNoticeRetrieveSpec
 
 
 class TaskBaseSpec(EMRResource):
@@ -66,8 +66,8 @@ class TaskListSpec(TaskBaseSpec):
                 mapping["focus"] = CommunicationRequestRetrieveSpec.serialize(
                     obj.focus
                 ).to_json()
-            if isinstance(obj.focus, PaymentReconciliation):
-                mapping["focus"] = PaymentReconciliationRetrieveSpec.serialize(
+            if isinstance(obj.focus, PaymentNotice):
+                mapping["focus"] = PaymentNoticeRetrieveSpec.serialize(
                     obj.focus
                 ).to_json()
             if isinstance(obj.focus, InsurancePlan):

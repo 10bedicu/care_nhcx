@@ -94,9 +94,10 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.coverage_eligibility import (
     CoverageEligibilityResponse as CoverageEligibilityResponseModel,
 )
-from nhcx.models.payment import PaymentReconciliation as PaymentReconciliationModel
+from nhcx.models.payment import PaymentNotice as PaymentNoticeModel
 from nhcx.models.task import Task as TaskModel
 from nhcx.models.task import TaskUseCaseChoices
+from nhcx.services.payment import create_draft_payment_reconciliation
 from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
 from nhcx.specs.claim import ClaimStatusChoices
@@ -258,9 +259,9 @@ class Fhir:
                 ),
             ],
             gender=patient.gender,
-            birthDate=patient.date_of_birth.isoformat()
-            if patient.date_of_birth
-            else None,
+            birthDate=(
+                patient.date_of_birth.isoformat() if patient.date_of_birth else None
+            ),
             address=[
                 Address(
                     line=[patient.address],
@@ -461,15 +462,17 @@ class Fhir:
                     else []
                 )
             ],
-            address=[
-                Address(
-                    line=[facility.address],
-                    postalCode=facility.pincode,
-                    country="IN",
-                )
-            ]
-            if facility.address
-            else None,
+            address=(
+                [
+                    Address(
+                        line=[facility.address],
+                        postalCode=facility.pincode,
+                        country="IN",
+                    )
+                ]
+                if facility.address
+                else None
+            ),
         )
 
     @cache_profiles(Location.get_resource_type())
@@ -513,13 +516,15 @@ class Fhir:
                     else []
                 )
             ],
-            address=Address(
-                line=[facility.address],
-                postalCode=facility.pincode,
-                country="IN",
-            )
-            if facility.address
-            else None,
+            address=(
+                Address(
+                    line=[facility.address],
+                    postalCode=facility.pincode,
+                    country="IN",
+                )
+                if facility.address
+                else None
+            ),
         )
 
     @cache_profiles(Condition.get_resource_type())
@@ -642,15 +647,19 @@ class Fhir:
             subscriberId=coverage.policy.memberid,
             beneficiary=self._reference(self._patient(coverage.patient)),
             payor=[
-                self._reference(self._participant_to_payer_organization(coverage.insurer))
+                self._reference(
+                    self._participant_to_payer_organization(coverage.insurer)
+                )
             ],
             status="active",
-            period=self._ist_period(
-                coverage.policy.policy_period.start,
-                coverage.policy.policy_period.end,
-            )
-            if coverage.policy.policy_period
-            else None,
+            period=(
+                self._ist_period(
+                    coverage.policy.policy_period.start,
+                    coverage.policy.policy_period.end,
+                )
+                if coverage.policy.policy_period
+                else None
+            ),
         )
 
     @cache_profiles(CommunicationRequest.get_resource_type())
@@ -667,17 +676,19 @@ class Fhir:
             identifier=[Identifier(value=request.identifier)],
             status=request.status,
             priority=request.priority,
-            category=[CodeableConcept(**category) for category in request.category]
-            if request.category
-            else None,
-            authoredOn=self._to_ist(request.authored_on)
-            if request.authored_on
-            else None,
-            payload=[
-                CommunicationRequestPayload(**payload) for payload in request.payload
-            ]
-            if request.payload
-            else None,
+            category=(
+                [CodeableConcept(**category) for category in request.category]
+                if request.category
+                else None
+            ),
+            authoredOn=(
+                self._to_ist(request.authored_on) if request.authored_on else None
+            ),
+            payload=(
+                [CommunicationRequestPayload(**payload) for payload in request.payload]
+                if request.payload
+                else None
+            ),
         )
 
     @cache_profiles(Communication.get_resource_type())
@@ -704,21 +715,23 @@ class Fhir:
             payload=[
                 CommunicationPayload(
                     contentString=payload.get("content_string"),
-                    contentAttachment=self._attachment(
-                        FileUpload.objects.filter(
-                            external_id=payload.get("content_attachment")
-                        ).first()
-                    )
-                    if payload.get("content_attachment")
-                    else None,
+                    contentAttachment=(
+                        self._attachment(
+                            FileUpload.objects.filter(
+                                external_id=payload.get("content_attachment")
+                            ).first()
+                        )
+                        if payload.get("content_attachment")
+                        else None
+                    ),
                 )
                 for payload in communication.payload
             ],
-            basedOn=[
-                self._reference(self._communication_request(communication.based_on))
-            ]
-            if not for_content_transfer
-            else None,
+            basedOn=(
+                [self._reference(self._communication_request(communication.based_on))]
+                if not for_content_transfer
+                else None
+            ),
         )
 
     def _policy_to_coverage(
@@ -879,20 +892,26 @@ class Fhir:
                     valueTime=answer.get("value_time"),
                     valueString=answer.get("value_string"),
                     valueUri=answer.get("value_uri"),
-                    valueCoding=Coding(**answer["value_coding"])
-                    if answer.get("value_coding")
-                    else None,
-                    valueQuantity=Quantity(**answer["value_quantity"])
-                    if answer.get("value_quantity")
-                    else None,
-                    valueAttachment=self._attachment(file_upload)
-                    if answer.get("value_attachment")
-                    and (
-                        file_upload := FileUpload.objects.filter(
-                            external_id=answer.get("value_attachment")
-                        ).first()
-                    )
-                    else None,
+                    valueCoding=(
+                        Coding(**answer["value_coding"])
+                        if answer.get("value_coding")
+                        else None
+                    ),
+                    valueQuantity=(
+                        Quantity(**answer["value_quantity"])
+                        if answer.get("value_quantity")
+                        else None
+                    ),
+                    valueAttachment=(
+                        self._attachment(file_upload)
+                        if answer.get("value_attachment")
+                        and (
+                            file_upload := FileUpload.objects.filter(
+                                external_id=answer.get("value_attachment")
+                            ).first()
+                        )
+                        else None
+                    ),
                 )
                 for answer in item.get("answer", [])
             ]
@@ -1470,6 +1489,18 @@ class Fhir:
         if task.use_case == TaskUseCaseChoices.COMMUNICATION_RESPONSE:
             self._communication(task.focus)
 
+        requester = None
+        owner = None
+        if task.use_case == TaskUseCaseChoices.PAYMENT_NOTICE_RESPONSE and task.claim:
+            requester = self._reference(
+                self._provider_organization(task.claim.provider.facility)
+            )
+            owner = self._reference(
+                self._participant_to_payer_organization(
+                    Participant(**task.claim.insurer)
+                )
+            )
+
         return Task(
             id=id,
             meta=Meta(
@@ -1482,15 +1513,19 @@ class Fhir:
             code=CodeableConcept(**task.code) if task.code else None,
             authoredOn=task.authored_on,
             description=task.description,
-            reasonCode=CodeableConcept(**task.reason_code)
-            if task.reason_code
-            else None,
-            input=[TaskInput(**_input) for _input in task.input]
-            if task.input
-            else None,
-            output=[TaskOutput(**output) for output in task.output]
-            if task.output
-            else None,
+            requester=requester,
+            owner=owner,
+            reasonCode=(
+                CodeableConcept(**task.reason_code) if task.reason_code else None
+            ),
+            input=(
+                [TaskInput(**_input) for _input in task.input] if task.input else None
+            ),
+            output=(
+                [TaskOutput(**output) for output in task.output]
+                if task.output
+                else None
+            ),
         )
 
     def _bundle_entry(self, resource: Resource):
@@ -1698,9 +1733,11 @@ class Fhir:
         return {
             "plan_name": classes[0].get("name") if classes else None,
             "plan_id": classes[0].get("value") if classes else None,
-            "policy_period": {"start": period.get("start"), "end": period.get("end")}
-            if period
-            else None,
+            "policy_period": (
+                {"start": period.get("start"), "end": period.get("end")}
+                if period
+                else None
+            ),
         }
 
     @staticmethod
@@ -1750,12 +1787,14 @@ class Fhir:
         return {
             "code": pos_codings[0].get("code") if pos_codings else None,
             "display": pos_codings[0].get("display") if pos_codings else None,
-            "category": {
-                "code": category_codings[0].get("code"),
-                "display": category_codings[0].get("display"),
-            }
-            if category_codings
-            else None,
+            "category": (
+                {
+                    "code": category_codings[0].get("code"),
+                    "display": category_codings[0].get("display"),
+                }
+                if category_codings
+                else None
+            ),
             "excluded": item.get("excluded", False),
             "allowed_amount": allowed_money,
             "authorization_required": item.get("authorizationRequired", False),
@@ -1932,7 +1971,7 @@ class Fhir:
             pre_auth_ref=getattr(claim_response, "preAuthRef", None),
             adjudication=claim_response.adjudication,
             identifier=claim_response.identifier,
-            type=claim_response.type,
+            type=getattr(claim_response, "type", None),
             item=claim_response.item,
             add_item=claim_response.addItem,
             total=claim_response.total,
@@ -2063,20 +2102,27 @@ class Fhir:
             ).get("resource")
         )
 
-        claim_request = Claim.construct(
-            **next(
-                filter(
-                    lambda entry: entry.get("resource", {}).get("resourceType")
-                    == "Claim",
-                    payment_notice_request_bundle.entry,
-                ),
-                {},
-            ).get("resource", {})
+        claim_number = self._extract_claim_number(payment_reconciliation.identifier)
+        claim_instance = (
+            ClaimModel.objects.filter(meta__claim_flow_id=claim_number)
+            .order_by("created_date")
+            .last()
+            if claim_number
+            else None
         )
-        request_id = claim_request.id or payment_notice_request_bundle.id
-        # TODO: verify if bundle id is claim id in production
 
-        claim_instance = ClaimModel.objects.filter(external_id=request_id).first()
+        payment_identifier = payment_reconciliation.paymentIdentifier
+        if isinstance(payment_identifier, dict):
+            payment_identifier = payment_identifier.get("value")
+
+        payment_notice_identifier = (
+            payment_reconciliation.id
+            or claim_number
+            or self._extract_identifier_value(payment_reconciliation.identifier)
+            or self._extract_identifier_value(
+                getattr(payment_notice_request_bundle, "identifier", None)
+            )
+        )
 
         with transaction.atomic():
             # TODO: use TaskSpec to create the instance
@@ -2099,16 +2145,16 @@ class Fhir:
                 },
             )
 
-            # TODO: use CommunicationRequestSpec to create the instance
-            payment_reconciliation_instance = PaymentReconciliationModel.objects.create(
-                identifier=payment_reconciliation.id,
+            # TODO: use a PaymentNoticeSpec to create the instance
+            payment_notice_instance = PaymentNoticeModel.objects.create(
+                identifier=payment_notice_identifier,
                 status=payment_reconciliation.status,
                 period=payment_reconciliation.period,
                 outcome=payment_reconciliation.outcome,
                 disposition=payment_reconciliation.disposition,
                 payment_date=payment_reconciliation.paymentDate,
                 payment_amount=payment_reconciliation.paymentAmount,
-                payment_identifier=payment_reconciliation.paymentIdentifier,
+                payment_identifier=payment_identifier,
                 detail=payment_reconciliation.detail,
                 process_note=payment_reconciliation.processNote,
                 request=task_instance,
@@ -2119,10 +2165,40 @@ class Fhir:
                 },
             )
 
-            task_instance.focus = payment_reconciliation_instance
+            task_instance.focus = payment_notice_instance
             task_instance.save()
 
-        return (task_instance, payment_reconciliation_instance, claim_instance)
+            if claim_instance is not None:
+                reconciliation = create_draft_payment_reconciliation(
+                    claim_instance, payment_notice_instance
+                )
+                if reconciliation is not None:
+                    payment_notice_instance.payment_reconciliation = reconciliation
+                    payment_notice_instance.save(
+                        update_fields=["payment_reconciliation", "modified_date"]
+                    )
+
+        return (task_instance, payment_notice_instance, claim_instance)
+
+    @staticmethod
+    def _extract_claim_number(identifiers) -> str | None:
+        for identifier in identifiers or []:
+            codings = (identifier.get("type") or {}).get("coding") or []
+            if any(coding.get("code") == "CLN" for coding in codings):
+                return identifier.get("value")
+        return None
+
+    @staticmethod
+    def _extract_identifier_value(identifier) -> str | None:
+        if not identifier:
+            return None
+        if isinstance(identifier, dict):
+            return identifier.get("value") or None
+        if isinstance(identifier, (list, tuple)):
+            for item in identifier:
+                if isinstance(item, dict) and item.get("value"):
+                    return item.get("value")
+        return None
 
     def process_insurance_plan_response(self, response: dict, headers: dict):
         task = TaskModel.objects.filter(

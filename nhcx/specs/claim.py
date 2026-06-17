@@ -322,6 +322,7 @@ class ClaimPayeeSpec(BaseModel):
     # TODO: add this after understanding field requirements
     pass
 
+
 class ClaimTaskActionRequestSpec(BaseModel):
     """Optional body for claim cancel and reprocess task actions."""
 
@@ -598,11 +599,19 @@ class ClaimListSpec(ClaimBaseSpec):
     patient: UUID4
     encounter: UUID4 | None = None
     latest_response: dict | None = None
+    payment_received: bool = False
+    is_paid: bool = False
     created_by: dict | None = None
     updated_by: dict | None = None
 
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
+        from care.emr.resources.payment_reconciliation.spec import (
+            PaymentReconciliationOutcomeOptions,
+            PaymentReconciliationStatusOptions,
+        )
+        from nhcx.models.payment import PaymentNotice
+
         mapping["id"] = obj.external_id
         mapping["provider"] = obj.provider.external_id
         mapping["patient"] = obj.patient.external_id
@@ -615,6 +624,17 @@ class ClaimListSpec(ClaimBaseSpec):
             mapping["latest_response"] = ClaimResponseRetrieveSpec.serialize(
                 latest_response
             ).to_json()
+
+        notices = PaymentNotice.objects.filter(claim=obj)
+        mapping["payment_received"] = notices.exists()
+        mapping["is_paid"] = notices.filter(
+            payment_reconciliation__status=(
+                PaymentReconciliationStatusOptions.active.value
+            ),
+            payment_reconciliation__outcome=(
+                PaymentReconciliationOutcomeOptions.complete.value
+            ),
+        ).exists()
 
         if obj.created_by:
             mapping["created_by"] = UserSpec.serialize(obj.created_by).to_json()

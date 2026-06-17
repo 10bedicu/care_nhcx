@@ -3,7 +3,7 @@ from django.db import models
 from care.emr.models.base import EMRBaseModel
 
 
-class PaymentReconciliation(EMRBaseModel):
+class PaymentNotice(EMRBaseModel):
     identifier = models.CharField(max_length=100, null=False, blank=False)
     status = models.CharField(max_length=100, null=False, blank=False)
     period = models.JSONField(default=dict, null=True, blank=True)
@@ -19,4 +19,11 @@ class PaymentReconciliation(EMRBaseModel):
     )
     claim = models.ForeignKey(
         "nhcx.Claim", on_delete=models.CASCADE, null=False, blank=False
+    )
+    payment_reconciliation = models.ForeignKey(
+        "emr.PaymentReconciliation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
     )

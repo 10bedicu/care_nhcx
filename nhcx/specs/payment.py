@@ -3,12 +3,15 @@ from datetime import datetime
 from pydantic import UUID4
 
 from care.emr.resources.base import EMRResource
-from nhcx.models.payment import PaymentReconciliation
+from care.emr.resources.payment_reconciliation.spec import (
+    PaymentReconciliationReadSpec,
+)
+from nhcx.models.payment import PaymentNotice
 
 
-class PaymentReconciliationRetrieveSpec(EMRResource):
-    __model__ = PaymentReconciliation
-    __exclude__ = ["request", "claim"]
+class PaymentNoticeRetrieveSpec(EMRResource):
+    __model__ = PaymentNotice
+    __exclude__ = ["request", "claim", "payment_reconciliation"]
 
     id: UUID4 | None = None
 
@@ -24,6 +27,7 @@ class PaymentReconciliationRetrieveSpec(EMRResource):
     process_note: list | None
     request: UUID4
     claim: UUID4
+    payment_reconciliation: dict | None = None
 
     created_date: datetime | None = None
     modified_date: datetime | None = None
@@ -33,3 +37,9 @@ class PaymentReconciliationRetrieveSpec(EMRResource):
         mapping["id"] = obj.external_id
         mapping["request"] = obj.request.external_id
         mapping["claim"] = obj.claim.external_id
+        if obj.payment_reconciliation:
+            mapping["payment_reconciliation"] = (
+                PaymentReconciliationReadSpec.serialize(
+                    obj.payment_reconciliation
+                ).to_json()
+            )
