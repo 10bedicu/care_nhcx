@@ -1,6 +1,8 @@
+import logging
 from typing import Any
 
 from abdm.service.request import Request
+from django.core.cache import cache
 from rest_framework import status
 
 from nhcx.services.types.participant import (
@@ -16,6 +18,12 @@ from nhcx.services.types.participant import (
     UpdateParticipantResponse,
 )
 from nhcx.utils.exceptions import NHCXAPIException
+
+logger = logging.getLogger(__name__)
+
+SEARCH_PARTICIPANT_CACHE_KEY = "nhcx:search_participant:{participant_code}"
+FETCH_CERTS_CACHE_KEY = "nhcx:fetch_certs:{participant_id}"
+PARTICIPANT_CACHE_TIMEOUT = 60 * 60  # 1 hour
 
 
 class ParticipantService:
@@ -74,6 +82,17 @@ class ParticipantService:
 
     @staticmethod
     def search_participant(data: SearchParticipantBody) -> SearchParticipantResponse:
+        cache_key = SEARCH_PARTICIPANT_CACHE_KEY.format(
+            participant_code=data.participant_code
+        )
+        cached = cache.get(cache_key)
+        if cached:
+            logger.debug(
+                "Using cached search_participant result for %s",
+                data.participant_code,
+            )
+            return SearchParticipantResponse(cached)
+
         path = "/participant/search"
         response = ParticipantService.request.post(
             path,
@@ -87,11 +106,20 @@ class ParticipantService:
             )
 
         response_data = response.json()
+        cache.set(cache_key, response_data, PARTICIPANT_CACHE_TIMEOUT)
         return SearchParticipantResponse(response_data)
 
     @staticmethod
     def fetch_certs(data: FetchCertsBody) -> FetchCertsResponse:
-        # TODO: consider caching the certs
+        cache_key = FETCH_CERTS_CACHE_KEY.format(participant_id=data.participantid)
+        cached = cache.get(cache_key)
+        if cached:
+            logger.debug(
+                "Using cached fetch_certs result for %s",
+                data.participantid,
+            )
+            return FetchCertsResponse(**cached)
+
         path = "/fetch/certs"
         response = ParticipantService.request.post(
             path,
@@ -105,6 +133,7 @@ class ParticipantService:
             )
 
         response_data = response.json()
+        cache.set(cache_key, response_data, PARTICIPANT_CACHE_TIMEOUT)
         return FetchCertsResponse(**response_data)
 
     @staticmethod
