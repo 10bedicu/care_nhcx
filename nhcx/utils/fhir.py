@@ -102,6 +102,7 @@ from nhcx.services.types.participant import Participant, Policy
 from nhcx.settings import plugin_settings as settings
 from nhcx.specs.claim import ClaimStatusChoices
 from nhcx.utils.insurance_plan_ingestor import InsurancePlanIngestor
+from nhcx.utils.structured_resources import get_handler
 
 logger = logging.getLogger(__name__)
 
@@ -1257,31 +1258,7 @@ class Fhir:
             ),
             supportingInfo=(
                 [
-                    ClaimSupportingInfo(
-                        sequence=supporting_info.get("sequence"),
-                        category=self._coding_to_codable_concept(
-                            CodingSpec(**supporting_info.get("category"))
-                        ),
-                        code=self._coding_to_codable_concept(
-                            CodingSpec(**supporting_info.get("code"))
-                        ),
-                        timingPeriod=(
-                            Period(**supporting_info.get("timing"))
-                            if supporting_info.get("timing")
-                            else None
-                        ),
-                        valueString=supporting_info.get("value_string"),
-                        valueAttachment=(
-                            self._attachment(si_file)
-                            if supporting_info.get("value_attachment")
-                            and (
-                                si_file := FileUpload.objects.filter(
-                                    external_id=supporting_info.get("value_attachment")
-                                ).first()
-                            )
-                            else None
-                        ),
-                    )
+                    self._claim_supporting_info(supporting_info, claim)
                     for supporting_info in claim.supporting_info
                 ]
                 if claim.supporting_info
@@ -1554,6 +1531,84 @@ class Fhir:
                 ),
                 *[self._bundle_entry(profile) for profile in self.cached_profiles()],
             ],
+        )
+
+    def _structured_resource_document_reference(
+        self, claim: ClaimModel, value_resource: dict
+    ) -> DocumentReference | None:
+        handler = get_handler(value_resource.get("resource_type"))
+        if handler is None:
+            return None
+
+        model = handler.resolve(value_resource.get("resource_id"), claim.patient)
+        if model is None:
+            return None
+
+        record_bundle = handler.build_record(AbdmFhir(), model)
+        record_json = record_bundle.json()
+        title = handler.resolve_title(model)
+
+        doc_id = str(uuid4())
+        document_reference = DocumentReference(
+            id=doc_id,
+            meta=Meta(
+                profile=[
+                    "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentReference"
+                ],
+            ),
+            identifier=[Identifier(value=doc_id)],
+            status="current",
+            type=CodeableConcept(text=title),
+            content=[
+                DocumentReferenceContent(
+                    attachment=Attachment(
+                        title=title,
+                        contentType="application/fhir+json",
+                        data=base64.b64encode(record_json.encode()),
+                    )
+                )
+            ],
+        )
+
+        cache_key = f"{DocumentReference.get_resource_type()}/{doc_id}"
+        self._profiles[cache_key] = document_reference
+        self._resource_id_url_map[cache_key] = doc_id
+        return document_reference
+
+    def _claim_supporting_info(
+        self, supporting_info: dict, claim: ClaimModel
+    ) -> ClaimSupportingInfo:
+        value_reference = None
+        value_resource = supporting_info.get("value_resource")
+        if value_resource:
+            document_reference = self._structured_resource_document_reference(
+                claim, value_resource
+            )
+            if document_reference is not None:
+                value_reference = self._reference(document_reference)
+
+        si_file = None
+        if supporting_info.get("value_attachment"):
+            si_file = FileUpload.objects.filter(
+                external_id=supporting_info.get("value_attachment")
+            ).first()
+
+        return ClaimSupportingInfo(
+            sequence=supporting_info.get("sequence"),
+            category=self._coding_to_codable_concept(
+                CodingSpec(**supporting_info.get("category"))
+            ),
+            code=self._coding_to_codable_concept(
+                CodingSpec(**supporting_info.get("code"))
+            ),
+            timingPeriod=(
+                Period(**supporting_info.get("timing"))
+                if supporting_info.get("timing")
+                else None
+            ),
+            valueString=supporting_info.get("value_string"),
+            valueAttachment=self._attachment(si_file) if si_file else None,
+            valueReference=value_reference,
         )
 
     _INPATIENT_ENCOUNTER_CLASSES = ("imp", "obsenc")

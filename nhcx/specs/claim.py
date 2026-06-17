@@ -165,6 +165,24 @@ class ClaimInsuranceSpec(BaseModel):
     policy: Policy
 
 
+class ClaimSupportingInfoResourceSpec(BaseModel):
+    resource_type: str
+    resource_id: UUID4
+
+    @field_validator("resource_type")
+    @classmethod
+    def validate_resource_type(cls, value):
+        from nhcx.utils.structured_resources import REGISTRY
+
+        if value not in REGISTRY:
+            msg = (
+                f"Unsupported structured resource type '{value}'. "
+                f"Supported: {sorted(REGISTRY)}"
+            )
+            raise ValidationError(msg)
+        return value
+
+
 class ClaimSupportingInfoSpec(BaseModel):
     sequence: int
     category: dict
@@ -172,6 +190,7 @@ class ClaimSupportingInfoSpec(BaseModel):
     timing: PeriodSpec | None = None
     value_string: str | None = None
     value_attachment: UUID4 | None = None
+    value_resource: ClaimSupportingInfoResourceSpec | None = None
 
     @field_validator("value_attachment")
     @classmethod
@@ -181,14 +200,19 @@ class ClaimSupportingInfoSpec(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_value_string_or_attachment(self):
-        if self.value_string is None and self.value_attachment is None:
+    def validate_single_value(self):
+        provided = [
+            value
+            for value in (self.value_string, self.value_attachment, self.value_resource)
+            if value is not None
+        ]
+        if len(provided) == 0:
             raise ValidationError(
-                "Either value_string or value_attachment must be present"
+                "One of value_string, value_attachment or value_resource must be present"
             )
-        if self.value_string is not None and self.value_attachment is not None:
+        if len(provided) > 1:
             raise ValidationError(
-                "Only one of value_string or value_attachment must be present"
+                "Only one of value_string, value_attachment or value_resource must be present"
             )
         return self
 
@@ -480,6 +504,30 @@ class ClaimCreateSpec(ClaimBaseSpec):
             raise ValidationError(
                 "The same charge item cannot be linked to multiple items"
             )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_structured_resources(self):
+        from nhcx.utils.structured_resources import get_handler
+
+        patient = Patient.objects.filter(external_id=self.patient).first()
+        if not patient:
+            return self
+
+        for info in self.supporting_info:
+            if not info.value_resource:
+                continue
+            handler = get_handler(info.value_resource.resource_type)
+            if not handler:
+                continue
+            resolved = handler.resolve(info.value_resource.resource_id, patient)
+            if resolved is None:
+                msg = (
+                    f"{handler.title} '{info.value_resource.resource_id}' was not "
+                    "found for this patient"
+                )
+                raise ValidationError(msg)
 
         return self
 
