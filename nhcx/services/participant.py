@@ -27,7 +27,7 @@ PARTICIPANT_CACHE_TIMEOUT = 60 * 60  # 1 hour
 
 
 class ParticipantService:
-    request = Request("https://apisbx.abdm.gov.in/pmjay/sbxhcx/participanthcxservice")
+    request = Request("https://hcxsbx.abdm.gov.in/participanthcxservice")
 
     @staticmethod
     def headers():

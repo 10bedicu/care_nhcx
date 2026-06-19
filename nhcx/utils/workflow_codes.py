@@ -269,14 +269,54 @@ _WORKFLOW_RESOLVERS = {
 }
 
 
-def resolve_claim_submission_workflow(claim: Claim) -> WorkflowCode:
+def _resolve_manual_resubmit_workflow(claim: Claim) -> WorkflowCode:
+    """
+    Force the resubmit workflow code when the user opts to manually resubmit.
+
+    We trust the user's intent but still block impossible cases: a resubmission
+    only makes sense when there is a prior submission of the *same use* to
+    resubmit against (a same-use ``related[0].claim``). This is what
+    distinguishes a first final claim (related is a pre-auth) from a claim
+    resubmission (related is a claim).
+    """
+    related = _related_claim(claim)
+
+    if claim.use == ClaimUseChoices.PRE_AUTHORIZATION.value:
+        if related is None or related.use != ClaimUseChoices.PRE_AUTHORIZATION.value:
+            raise ValidationError(
+                "Cannot resubmit: no prior pre-auth submission to resubmit against."
+            )
+        return WorkflowCode.PREAUTH_REQUEST_RESUBMITTED
+
+    if claim.use == ClaimUseChoices.CLAIM.value:
+        if related is None or related.use != ClaimUseChoices.CLAIM.value:
+            raise ValidationError(
+                "Cannot resubmit: no prior claim submission to resubmit against."
+            )
+        return WorkflowCode.CLAIM_REQUEST_RESUBMITTED
+
+    raise ValidationError(
+        "Manual resubmit is only supported for pre-auth and final claims."
+    )
+
+
+def resolve_claim_submission_workflow(
+    claim: Claim, force_resubmit: bool = False
+) -> WorkflowCode:
     """
     Resolve the NHCX workflow code for a pre-auth or final-claim submission.
+
+    When ``force_resubmit`` is set the user has explicitly opted to resubmit, so
+    we bypass the auto-derivation and force the resubmit code (see
+    ``_resolve_manual_resubmit_workflow``).
 
     Raises ``ValidationError`` when the related-claim chain is in a state that
     blocks submission (no response yet, in-process, already approved with no
     reprocess intent, etc.).
     """
+    if force_resubmit:
+        return _resolve_manual_resubmit_workflow(claim)
+
     resolver = _WORKFLOW_RESOLVERS.get(claim.use)
     if resolver is None:
         msg = f"Unsupported claim.use '{claim.use}' for workflow resolution."

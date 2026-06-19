@@ -115,12 +115,12 @@ _DISCHARGE_DISPOSITION_NDHM_MAP: dict[str, tuple[str, str]] = {
     "alt_home": ("DTH", "DischargeToHome (Discharge disposition status)"),
     "aadvice": ("LAMA", "Left Against Medical Advice"),
     "exp": ("DTM", "DischargeToMortuary (Discharge disposition status)"),
-    "other_hcf": ("DAMA", "Discharged Against Medical Advice"),
-    "hosp": ("DAMA", "Discharged Against Medical Advice"),
-    "long": ("DAMA", "Discharged Against Medical Advice"),
-    "psy": ("DAMA", "Discharged Against Medical Advice"),
-    "rehab": ("DAMA", "Discharged Against Medical Advice"),
-    "snf": ("DAMA", "Discharged Against Medical Advice"),
+    "other_hcf": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "hosp": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "long": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "psy": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "rehab": ("DTH", "DischargeToHome (Discharge disposition status)"),
+    "snf": ("DTH", "DischargeToHome (Discharge disposition status)"),
     "oth": ("DAMA", "Discharged Against Medical Advice"),
 }
 

@@ -22,6 +22,7 @@ from nhcx.specs.claim import (
     ClaimCreateSpec,
     ClaimListSpec,
     ClaimRetrieveSpec,
+    ClaimSubmitRequestSpec,
     ClaimTaskActionRequestSpec,
     ClaimUseChoices,
     default_cancel_reason_code,
@@ -81,14 +82,17 @@ class ClaimViewSet(
         return Response(self.get_retrieve_pydantic_model().serialize(claim).to_json())
 
     @extend_schema(
-        request=None,
+        request=ClaimSubmitRequestSpec,
         responses={200: ClaimRetrieveSpec},
     )
     @action(detail=True, methods=["POST"])
     def submit(self, request, *args, **kwargs):
         claim = self.get_object()
 
-        workflow_code = resolve_claim_submission_workflow(claim)
+        submit_request = ClaimSubmitRequestSpec.model_validate(request.data or {})
+        workflow_code = resolve_claim_submission_workflow(
+            claim, force_resubmit=submit_request.resubmit
+        )
 
         fhir_data = Fhir().create_claim_bundle(claim)
 

@@ -17,7 +17,7 @@ from nhcx.utils.exceptions import NHCXAPIException
 
 
 class GatewayService:
-    request = Request("https://apisbx.abdm.gov.in/hcx")
+    request = Request("https://hcxsbx.abdm.gov.in")
 
     @staticmethod
     def headers():
@@ -53,7 +53,7 @@ class GatewayService:
 
     @staticmethod
     def coverage_eligibility__check(payload: str) -> dict:
-        path = "/v1/coverageeligibility/check"
+        path = "/coverageeligibilityhcxservice/v1/coverageeligibility/check"
 
         response = GatewayService.request.post(
             path,
@@ -68,7 +68,7 @@ class GatewayService:
 
     @staticmethod
     def insurance_plan__request(payload: str) -> dict:
-        path = "/v1/insuranceplan/request"
+        path = "/insuranceplanhcxservice/v1/insuranceplan/request"
 
         response = GatewayService.request.post(
             path,
@@ -85,7 +85,7 @@ class GatewayService:
     def predetermination__submit(
         payload: str, biometric_auth_token: str | None = None
     ) -> dict:
-        path = "/v1/predetermination/submit"
+        path = "/predeterminationhcxservice/v1/predetermination/submit"
 
         response = GatewayService.request.post(
             path,
@@ -103,7 +103,7 @@ class GatewayService:
 
     @staticmethod
     def pre_auth__submit(payload: str, biometric_auth_token: str | None = None) -> dict:
-        path = "/v1/preauth/submit"
+        path = "/preauthhcxservice/v1/preauth/submit"
 
         response = GatewayService.request.post(
             path,
@@ -121,7 +121,7 @@ class GatewayService:
 
     @staticmethod
     def claim__submit(payload: str, biometric_auth_token: str | None = None) -> dict:
-        path = "/v1/claim/submit"
+        path = "/claimhcxservice/v1/claim/submit"
 
         response = GatewayService.request.post(
             path,
@@ -139,7 +139,7 @@ class GatewayService:
 
     @staticmethod
     def communication__on_request(payload: str) -> dict:
-        path = "/v1/communication/on_request"
+        path = "/communicationhcxservice/v1/communication/on_request"
 
         response = GatewayService.request.post(
             path,
@@ -154,7 +154,7 @@ class GatewayService:
 
     @staticmethod
     def task__submit(payload: str) -> dict:
-        path = "/v1/task/submit"
+        path = "/taskhcxservice/v1/task/submit"
 
         response = GatewayService.request.post(
             path,
@@ -169,7 +169,7 @@ class GatewayService:
 
     @staticmethod
     def payment_notice__on_request(payload: str) -> dict:
-        path = "/v1/paymentnotice/on_request"
+        path = "/servicehcxpayment/v1/paymentnotice/on_request"
 
         response = GatewayService.request.post(
             path,
@@ -282,9 +282,7 @@ class GatewayService:
         claim_consent: ClaimConsent,
     ) -> ClaimConsent:
         process = (
-            "Discharge"
-            if claim_consent.stage == ClaimConsentStage.CLAIM
-            else "Preauth"
+            "Discharge" if claim_consent.stage == ClaimConsentStage.CLAIM else "Preauth"
         )
         refresh_response = GatewayService.abha__biometric__auth__refresh(
             AbhaBiometricAuthRefreshBody(

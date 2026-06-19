@@ -354,6 +354,16 @@ class ClaimTaskActionRequestSpec(BaseModel):
     description: str | None = None
 
 
+class ClaimSubmitRequestSpec(BaseModel):
+    """Optional body for the claim submit action.
+
+    ``resubmit`` opts out of the auto-derived workflow code and forces the
+    resubmit code (121 for pre-auth, 16 for final claim).
+    """
+
+    resubmit: bool = False
+
+
 def default_cancel_reason_code() -> Coding:
     return Coding(
         system="https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-reason-code",
