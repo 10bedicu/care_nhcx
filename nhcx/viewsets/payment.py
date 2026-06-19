@@ -89,9 +89,6 @@ class PaymentViewSet(EMRBaseViewSet):
 
         fhir_data = Fhir().create_task_bundle(task)
 
-        with open("payment_notice_acknowledge.json", "w") as f:
-            f.write(fhir_data.json())
-
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
@@ -104,6 +101,7 @@ class PaymentViewSet(EMRBaseViewSet):
             ),
             status="response.complete",
             workflow_id=resolve_payment_acknowledge_workflow().value,
+            log_type="payment_notice_acknowledge",
         )
 
         dispatch(task, GatewayService.payment_notice__on_request, encrypted_payload)

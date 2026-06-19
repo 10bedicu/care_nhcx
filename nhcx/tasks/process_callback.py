@@ -21,6 +21,7 @@ from nhcx.models.inbound_envelope import (
     EnvelopeStatusChoices,
     NHCXInboundEnvelope,
 )
+from nhcx.utils.bundle_log import log_fhir_bundle
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
 
@@ -84,6 +85,16 @@ def process_nhcx_callback(self, envelope_id: int):
         decrypted = NHCX.decrypt(
             recipient_code=envelope.recipient_code,
             data=envelope.raw_payload,
+        )
+
+        headers = envelope.headers or {}
+        log_fhir_bundle(
+            bundle_type=envelope.callback_type,
+            workflow_id=headers.get("x-hcx-workflow_id") or "1",
+            correlation_id=envelope.correlation_id
+            or headers.get("x-hcx-correlation_id")
+            or "unknown",
+            bundle=decrypted,
         )
 
         handler = _dispatch_table().get(envelope.callback_type)

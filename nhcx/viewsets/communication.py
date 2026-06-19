@@ -86,9 +86,6 @@ class CommunicationViewSet(
 
         fhir_data = Fhir().create_task_bundle(task)
 
-        with open("communication_send.json", "w") as f:
-            f.write(fhir_data.json())
-
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
@@ -101,6 +98,7 @@ class CommunicationViewSet(
             ),
             status="response.complete",
             workflow_id="151" if claim.use == ClaimUseChoices.CLAIM else "19",
+            log_type="communication_send",
         )
 
         dispatch(task, GatewayService.communication__on_request, encrypted_payload)

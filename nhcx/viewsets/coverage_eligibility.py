@@ -86,9 +86,6 @@ class CoverageEligibilityRequestViewSet(
             coverage_eligibility_request
         )
 
-        with open("coverage_eligibility_request_check.json", "w") as f:
-            f.write(fhir_data.json())
-
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
@@ -98,6 +95,7 @@ class CoverageEligibilityRequestViewSet(
             patient_abha_number=coverage_eligibility_request.patient.abha_number.abha_number,
             correlation_id=str(coverage_eligibility_request.external_id),
             status="request.initiated",
+            log_type="coverage_eligibility_request_check",
         )
 
         dispatch(

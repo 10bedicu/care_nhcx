@@ -96,9 +96,6 @@ class ClaimViewSet(
 
         fhir_data = Fhir().create_claim_bundle(claim)
 
-        with open("claim_submit.json", "w") as f:
-            f.write(fhir_data.json())
-
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
@@ -109,6 +106,7 @@ class ClaimViewSet(
             correlation_id=str(claim.external_id),
             status="request.initiated",
             workflow_id=workflow_code.value,
+            log_type="claim_submit",
         )
 
         consent_stage = (
@@ -236,9 +234,6 @@ class ClaimViewSet(
 
         fhir_data = Fhir().create_task_bundle(task)
 
-        with open("claim_cancel_request.json", "w") as f:
-            f.write(fhir_data.json())
-
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
@@ -249,6 +244,7 @@ class ClaimViewSet(
             correlation_id=str(task.external_id),
             status="request.initiated",
             workflow_id=workflow_code.value,
+            log_type="claim_cancel_request",
         )
 
         dispatch(task, GatewayService.task__submit, encrypted_payload)
@@ -312,9 +308,6 @@ class ClaimViewSet(
 
         fhir_data = Fhir().create_task_bundle(task)
 
-        with open("claim_reprocess_request.json", "w") as f:
-            f.write(fhir_data.json())
-
         fhir_payload = json.loads(fhir_data.json())
 
         encrypted_payload = NHCX.encrypt(
@@ -325,6 +318,7 @@ class ClaimViewSet(
             correlation_id=str(task.external_id),
             status="request.initiated",
             workflow_id=workflow_code.value,
+            log_type="claim_reprocess_request",
         )
 
         dispatch(task, GatewayService.task__submit, encrypted_payload)

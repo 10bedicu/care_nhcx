@@ -164,6 +164,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
             correlation_id=str(task.external_id),
             status="request.initiated",
             workflow_id="",
+            log_type="insurance_plan_request",
         )
         dispatch(task, GatewayService.insurance_plan__request, encrypted_payload)
 

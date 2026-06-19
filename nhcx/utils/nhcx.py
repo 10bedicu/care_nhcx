@@ -9,6 +9,7 @@ from jwcrypto import jwe, jwk
 from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import FetchCertsBody
+from nhcx.utils.bundle_log import log_fhir_bundle
 from nhcx.utils.exceptions import NHCXInternalException
 
 
@@ -38,6 +39,7 @@ class NHCX:
         debug_flag: Literal["ERROR", "INFO", "DEBUG"] | None
         error_details: ErrorDetails | None
         debug_details: ErrorDetails | None
+        log_type: str | None
 
     @staticmethod
     def prepare_headers(
@@ -98,6 +100,15 @@ class NHCX:
         ).encryption_cert
 
         headers = NHCX.prepare_headers(**header_params)
+
+        log_type = header_params.get("log_type")
+        if log_type:
+            log_fhir_bundle(
+                bundle_type=log_type,
+                workflow_id=header_params.get("workflow_id") or "1",
+                correlation_id=header_params["correlation_id"],
+                bundle=data,
+            )
 
         jwe_payload = jwe.JWE(
             str(json.dumps(data)),

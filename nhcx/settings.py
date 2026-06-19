@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 import environ
@@ -99,9 +100,13 @@ class PluginSettings:  # pragma: no cover
 
 REQUIRED_SETTINGS = {"BACKEND_DOMAIN"}
 
+NHCX_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+
 DEFAULTS = {
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
     "PAYER": "PMJAY",  # DUMMY | PMJAY
+    "LOGS_DIR": str(NHCX_PLUGIN_ROOT / "logs"),
+    "NHCX_DEBUG": False,
 }
 
 plugin_settings = PluginSettings(
