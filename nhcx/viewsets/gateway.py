@@ -7,9 +7,9 @@ from rest_framework.response import Response
 from care.emr.api.viewsets.base import EMRBaseViewSet
 from care.emr.models import Encounter
 from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
-from nhcx.services.gateway import GatewayService
+from nhcx.services.abha_biometric import AbhaBiometricService
 from nhcx.services.participant import ParticipantService
-from nhcx.services.types.gateway import (
+from nhcx.services.types.abha_biometric import (
     AbhaBiometricAuthInitApiBody,
     AbhaBiometricAuthInitBody,
     AbhaBiometricAuthInitResponse,
@@ -38,7 +38,7 @@ class GatewayViewSet(EMRBaseViewSet):
     def abha__biometric__auth__init(self, request, *args, **kwargs):
         body = AbhaBiometricAuthInitApiBody(**request.data)
         service_body = AbhaBiometricAuthInitBody(**body.model_dump())
-        init_response = GatewayService.abha__biometric__auth__init(service_body)
+        init_response = AbhaBiometricService.auth__init(service_body)
         return Response(
             init_response.model_dump(mode="json"), status=status.HTTP_200_OK
         )
@@ -61,7 +61,7 @@ class GatewayViewSet(EMRBaseViewSet):
         service_body = AbhaBiometricAuthVerifyBody(
             **body.model_dump(exclude={"encounter"})
         )
-        verify_response = GatewayService.abha__biometric__auth__verify(service_body)
+        verify_response = AbhaBiometricService.auth__verify(service_body)
         accounts = [a.model_dump(mode="json") for a in verify_response.accounts]
         stage = (
             ClaimConsentStage.PREAUTHORIZATION

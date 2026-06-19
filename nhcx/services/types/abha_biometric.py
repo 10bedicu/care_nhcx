@@ -47,6 +47,7 @@ class AbhaBiometricAuthVerifyResponse(BaseModel):
     refreshExpiresIn: int
     accounts: list[Account]
 
+
 class AbhaBiometricAuthInitApiBody(AbhaBiometricAuthInitBody):
     pass
 
