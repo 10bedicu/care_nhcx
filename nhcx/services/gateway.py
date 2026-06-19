@@ -163,7 +163,7 @@ class GatewayService:
 
         response = GatewayService.request.post(
             path,
-            {"payload": payload},
+            {"type": "JWEPayload", "payload": payload},
             headers=GatewayService.headers(),
         )
 
