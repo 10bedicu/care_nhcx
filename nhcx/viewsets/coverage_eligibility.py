@@ -12,9 +12,11 @@ from rest_framework.response import Response
 from care.emr.api.viewsets.base import (
     EMRBaseViewSet,
     EMRCreateMixin,
+    EMRDestroyMixin,
     EMRListMixin,
     EMRRetrieveMixin,
 )
+from nhcx.models import DispatchStatusChoices
 from nhcx.models.coverage_eligibility import CoverageEligibilityRequest
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.coverage_eligibility import (
@@ -48,6 +50,7 @@ class CoverageEligibilityRequestViewSet(
     EMRCreateMixin,
     EMRListMixin,
     EMRRetrieveMixin,
+    EMRDestroyMixin,
     EMRBaseViewSet,
 ):
     database_model = CoverageEligibilityRequest
@@ -63,6 +66,15 @@ class CoverageEligibilityRequestViewSet(
 
     def get_queryset(self):
         return self.database_model.objects.all().order_by("-modified_date")
+
+    def validate_destroy(self, instance):
+        # Only un-dispatched drafts can be removed; once a request has been sent
+        # to the payer it is an immutable record of what was submitted.
+        if instance.dispatch_status != DispatchStatusChoices.PENDING:
+            raise ValidationError(
+                "This coverage eligibility request has already been submitted "
+                "to the payer and can no longer be removed."
+            )
 
     @extend_schema(
         request=None,
@@ -99,7 +111,11 @@ class CoverageEligibilityRequestViewSet(
                 )
                 coverage_eligibility_request.save(update_fields=["encounter"])
 
-        if not coverage_eligibility_request.encounter_id:
+        # An encounter anchors auth-requirements / claim flows. A pure validation
+        # check (wallet balance + demographic verification) can run before an
+        # encounter exists, e.g. at registration / appointment time.
+        requires_encounter = "auth-requirements" in coverage_eligibility_request.purpose
+        if requires_encounter and not coverage_eligibility_request.encounter_id:
             raise ValidationError(
                 "An encounter is required before submitting the coverage eligibility request"
             )
