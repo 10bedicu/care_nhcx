@@ -1,10 +1,12 @@
 import json
 
+from django.db.models import Q
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters as drf_filters
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import (
@@ -26,10 +28,17 @@ from nhcx.utils.nhcx import NHCX
 
 
 class CoverageEligibilityRequestFilter(filters.FilterSet):
-    encounter = filters.UUIDFilter(field_name="encounter__external_id")
+    encounter = filters.UUIDFilter(method="filter_encounter")
+    appointment = filters.UUIDFilter(field_name="appointment__external_id")
     patient = filters.UUIDFilter(field_name="patient__external_id")
     facility = filters.UUIDFilter(field_name="provider__facility__external_id")
     purpose = filters.CharFilter(method="filter_purpose")
+
+    def filter_encounter(self, queryset, name, value):
+        return queryset.filter(
+            Q(encounter__external_id=value)
+            | Q(appointment__associated_encounter__external_id=value)
+        )
 
     def filter_purpose(self, queryset, name, value):
         return queryset.filter(purpose__contains=[value])
@@ -81,6 +90,19 @@ class CoverageEligibilityRequestViewSet(
     @action(detail=True, methods=["POST"])
     def check(self, request, *args, **kwargs):
         coverage_eligibility_request = self.get_object()
+
+        if not coverage_eligibility_request.encounter_id:
+            appointment = coverage_eligibility_request.appointment
+            if appointment and appointment.associated_encounter_id:
+                coverage_eligibility_request.encounter = (
+                    appointment.associated_encounter
+                )
+                coverage_eligibility_request.save(update_fields=["encounter"])
+
+        if not coverage_eligibility_request.encounter_id:
+            raise ValidationError(
+                "An encounter is required before submitting the coverage eligibility request"
+            )
 
         fhir_data = Fhir().create_coverage_eligibility_request_bundle(
             coverage_eligibility_request

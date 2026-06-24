@@ -17,6 +17,9 @@ class CoverageEligibilityRequest(EMRBaseModel):
     encounter = models.ForeignKey(
         "emr.Encounter", on_delete=models.CASCADE, null=True, blank=True
     )
+    appointment = models.ForeignKey(
+        "emr.TokenBooking", on_delete=models.SET_NULL, null=True, blank=True
+    )
     insurer = models.JSONField(default=dict, null=False, blank=False)
     supporting_info = models.JSONField(default=list, null=True, blank=True)
     insurance = models.JSONField(default=list, null=False, blank=False)

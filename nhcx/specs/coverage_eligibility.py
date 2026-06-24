@@ -10,6 +10,7 @@ from care.emr.models.condition import Condition
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import Patient
+from care.emr.models.scheduling.booking import TokenBooking
 from care.emr.resources.base import EMRResource, PeriodSpec
 from care.emr.resources.charge_item.spec import ChargeItemReadSpec
 from care.emr.resources.common.quantity import Quantity
@@ -137,7 +138,7 @@ class CoverageEligibilityRequestItemSpec(BaseModel):
 
 class CoverageEligibilityRequestBaseSpec(EMRResource):
     __model__ = CoverageEligibilityRequest
-    __exclude__ = ["patient", "facility", "encounter"]
+    __exclude__ = ["patient", "facility", "encounter", "appointment"]
     id: UUID4 = None
 
     created_date: datetime | None = None
@@ -151,6 +152,7 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
     facility: UUID4
     patient: UUID4
     encounter: UUID4 | None = None
+    appointment: UUID4 | None = None
     supporting_info: list[CoverageEligibilityRequestSupportingInfoSpec] = []
     insurance: list[CoverageEligibilityRequestInsuranceSpec] = Field([], min_length=1)
     item: list[CoverageEligibilityRequestItemSpec] = []
@@ -160,6 +162,13 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
     def validate_encounter(cls, value):
         if value and not Encounter.objects.filter(external_id=value).exists():
             raise ValidationError("Encounter not found")
+        return value
+
+    @field_validator("appointment")
+    @classmethod
+    def validate_appointment(cls, value):
+        if value and not TokenBooking.objects.filter(external_id=value).exists():
+            raise ValidationError("Appointment not found")
         return value
 
     @field_validator("patient")
@@ -210,6 +219,11 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
     def perform_extra_deserialization(self, is_update, obj):
         if self.encounter:
             obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
+
+        if self.appointment:
+            obj.appointment = get_object_or_404(
+                TokenBooking, external_id=self.appointment
+            )
 
         obj.patient = get_object_or_404(Patient, external_id=self.patient)
         obj.provider = get_object_or_404(Provider, facility__external_id=self.facility)
@@ -311,6 +325,7 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
     provider: UUID4
     patient: UUID4
     encounter: UUID4 | None = None
+    appointment: UUID4 | None = None
     latest_response: dict | None = None
     created_by: dict | None = None
     updated_by: dict | None = None
@@ -321,6 +336,9 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
         mapping["provider"] = obj.provider.external_id
         mapping["patient"] = obj.patient.external_id
         mapping["encounter"] = obj.encounter.external_id if obj.encounter else None
+        mapping["appointment"] = (
+            obj.appointment.external_id if obj.appointment else None
+        )
 
         latest_response = (
             CoverageEligibilityResponse.objects.filter(
