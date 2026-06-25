@@ -7,8 +7,8 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('emr', '0078_merge_20260409_1618'),
-        ('nhcx', '0022_paymentnotice'),
+        ("emr", "0077_tagconfig_metadata"),
+        ("nhcx", "0022_paymentnotice"),
     ]
 
     operations = [
