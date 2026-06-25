@@ -41,6 +41,8 @@ class CommunicationViewSet(
         previous_task = communication.based_on.based_on
         claim = communication.about
 
+        workflow_code = "151" if claim.use == ClaimUseChoices.CLAIM else "19"
+
         task = Task.objects.create(
             status="completed",
             intent=previous_task.intent,
@@ -77,6 +79,7 @@ class CommunicationViewSet(
             use_case=TaskUseCaseChoices.COMMUNICATION_RESPONSE,
             focus_type=ContentType.objects.get_for_model(Communication),
             focus_id=communication.id,
+            workflow_code=workflow_code,
         )
 
         communication.part_of = task
@@ -97,7 +100,7 @@ class CommunicationViewSet(
                 "x-hcx-correlation_id"
             ),
             status="response.complete",
-            workflow_id="151" if claim.use == ClaimUseChoices.CLAIM else "19",
+            workflow_id=workflow_code,
             log_type="communication_send",
         )
 

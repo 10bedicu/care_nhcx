@@ -70,6 +70,14 @@ class WorkflowCode(StrEnum):
     REPROCESS_REQUEST_SUBMITTED = "18"
 
 
+_ENHANCEMENT_PREAUTH_CODES: frozenset[str] = frozenset(
+    {
+        WorkflowCode.ENHANCEMENT_REQUEST_INITIATED.value,
+        WorkflowCode.ENHANCEMENT_QUERY_RESPONSE_SUBMITTED.value,
+    }
+)
+
+
 def _adjudication_status(claim_response: ClaimResponse | None) -> str | None:
     """
     Pull the machine-readable status code (approved / queried / rejected /
@@ -201,6 +209,28 @@ def _is_enhancement_claim(claim: Claim) -> bool:
     return False
 
 
+def _queried_is_enhancement(queried_claim: Claim) -> bool:
+    """
+    Decide whether a reply to a *queried* pre-auth is an enhancement-query
+    response (``131``) or a plain pre-auth-query response (``19``).
+
+    Every pre-auth submission records the ``workflow_code`` it was sent with, so
+    the kind of the queried request is read straight off it — a forced resubmit
+    (``121``), fresh pre-auth (``12``) or pre-auth query reply (``19``) is never
+    an enhancement, while an enhancement initiation (``13``) or enhancement
+    query reply (``131``) always is. This also covers a query *on a query*: the
+    queried request already carries ``19`` or ``131``, which is definitive on
+    its own — no need to walk the related chain.
+
+    Only legacy rows submitted before the column existed (no stored code) fall
+    back to the chain-walking item-diff heuristic (``_is_enhancement_claim``).
+    """
+    code = queried_claim.workflow_code or None
+    if code is not None:
+        return code in _ENHANCEMENT_PREAUTH_CODES
+    return _is_enhancement_claim(queried_claim)
+
+
 def _resolve_preauth_workflow(claim: Claim) -> WorkflowCode:
     related = _related_claim(claim)
     if related is None:
@@ -209,7 +239,7 @@ def _resolve_preauth_workflow(claim: Claim) -> WorkflowCode:
     related_status = _latest_response_status(related)
 
     if related_status == QUERIED_RESPONSE_STATUS:
-        if _is_enhancement_claim(related):
+        if _queried_is_enhancement(related):
             return WorkflowCode.ENHANCEMENT_QUERY_RESPONSE_SUBMITTED
         return WorkflowCode.PREAUTH_QUERY_RESPONSE_SUBMITTED
 

@@ -150,6 +150,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
             ],
             output=[],
             use_case=TaskUseCaseChoices.INSURANCE_PLAN_REQUEST,
+            workflow_code="",
         )
 
         fhir_data = Fhir().create_task_bundle(task)

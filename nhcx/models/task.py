@@ -45,6 +45,7 @@ class Task(EMRBaseModel):
     )
     focus_id = models.PositiveIntegerField(null=True, blank=True)
     focus = GenericForeignKey("focus_type", "focus_id")
+    workflow_code = models.CharField(max_length=8, null=True, blank=True, db_index=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     dispatch_error = models.TextField(blank=True, default="")
     dispatch_status = models.CharField(

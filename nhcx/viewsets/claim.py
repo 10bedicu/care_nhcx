@@ -94,6 +94,9 @@ class ClaimViewSet(
             claim, force_resubmit=submit_request.resubmit
         )
 
+        claim.workflow_code = workflow_code.value
+        claim.save(update_fields=["workflow_code", "modified_date"])
+
         fhir_data = Fhir().create_claim_bundle(claim)
 
         fhir_payload = json.loads(fhir_data.json())
@@ -230,6 +233,7 @@ class ClaimViewSet(
             output=[],
             claim=claim,
             use_case=TaskUseCaseChoices.CANCEL_REQUEST,
+            workflow_code=workflow_code.value,
         )
 
         fhir_data = Fhir().create_task_bundle(task)
@@ -304,6 +308,7 @@ class ClaimViewSet(
             output=[],
             claim=claim,
             use_case=TaskUseCaseChoices.REPROCESS_REQUEST,
+            workflow_code=workflow_code.value,
         )
 
         fhir_data = Fhir().create_task_bundle(task)

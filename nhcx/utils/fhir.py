@@ -1971,6 +1971,7 @@ class Fhir:
                 error=coverage_eligibility_response.error,
                 disposition=coverage_eligibility_response.disposition,
                 insurance=insurances,
+                workflow_code=headers.get("x-hcx-workflow_id", ""),
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,
@@ -2031,6 +2032,7 @@ class Fhir:
             add_item=claim_response.addItem,
             total=claim_response.total,
             error=claim_response.error,
+            workflow_code=headers.get("x-hcx-workflow_id", ""),
             meta={
                 "raw_response": response,
                 "raw_headers": headers,
@@ -2360,6 +2362,7 @@ class Fhir:
                 output=task.output,
                 claim=claim_instance,
                 use_case=response_use_case,
+                workflow_code=headers.get("x-hcx-workflow_id", ""),
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,
@@ -2381,6 +2384,7 @@ class Fhir:
                 add_item=claim_response.addItem,
                 total=claim_response.total,
                 error=claim_response.error,
+                workflow_code=headers.get("x-hcx-workflow_id", ""),
                 meta={
                     "raw_response": response,
                     "raw_headers": headers,

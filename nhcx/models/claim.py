@@ -30,6 +30,7 @@ class Claim(EMRBaseModel):
     accident = models.JSONField(null=True, blank=True)
     payee = models.JSONField(null=True, blank=True)
     questionnaire_responses = models.JSONField(default=list, null=True, blank=True)
+    workflow_code = models.CharField(max_length=8, null=True, blank=True, db_index=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     dispatch_error = models.TextField(blank=True, default="")
     dispatch_status = models.CharField(
@@ -59,3 +60,4 @@ class ClaimResponse(EMRBaseModel):
     add_item = models.JSONField(null=True, blank=True)
     total = models.JSONField(null=True, blank=True)
     error = models.JSONField(null=True, blank=True)
+    workflow_code = models.CharField(max_length=8, null=True, blank=True, db_index=True)

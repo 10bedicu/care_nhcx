@@ -24,6 +24,7 @@ class CoverageEligibilityRequest(EMRBaseModel):
     supporting_info = models.JSONField(default=list, null=True, blank=True)
     insurance = models.JSONField(default=list, null=False, blank=False)
     item = models.JSONField(default=list, null=True, blank=True)
+    workflow_code = models.CharField(max_length=8, null=True, blank=True, db_index=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     dispatch_error = models.TextField(blank=True, default="")
     dispatch_status = models.CharField(
@@ -40,7 +41,6 @@ class CoverageEligibilityResponse(EMRBaseModel):
     )
     outcome = models.CharField(max_length=100, null=False, blank=False)
     disposition = models.TextField(null=True, blank=True)
-    # Stores a dereferenced list of InsuranceEntry objects (see InsuranceEntrySpec).
-    # Raw FHIR bundle is preserved in meta["raw_response"].
     insurance = models.JSONField(null=True, blank=True)
     error = models.JSONField(null=True, blank=True)
+    workflow_code = models.CharField(max_length=8, null=True, blank=True, db_index=True)

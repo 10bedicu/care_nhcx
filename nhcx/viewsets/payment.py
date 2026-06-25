@@ -85,6 +85,7 @@ class PaymentViewSet(EMRBaseViewSet):
             part_of=previous_task,
             claim=claim,
             use_case=TaskUseCaseChoices.PAYMENT_NOTICE_RESPONSE,
+            workflow_code=resolve_payment_acknowledge_workflow().value,
         )
 
         fhir_data = Fhir().create_task_bundle(task)

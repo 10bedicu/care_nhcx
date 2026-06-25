@@ -126,6 +126,11 @@ class CoverageEligibilityRequestViewSet(
 
         fhir_payload = json.loads(fhir_data.json())
 
+        coverage_eligibility_request.workflow_code = "1"
+        coverage_eligibility_request.save(
+            update_fields=["workflow_code", "modified_date"]
+        )
+
         encrypted_payload = NHCX.encrypt(
             data=fhir_payload,
             sender_code=coverage_eligibility_request.provider.participant_code,
@@ -133,6 +138,7 @@ class CoverageEligibilityRequestViewSet(
             patient_abha_number=coverage_eligibility_request.patient.abha_number.abha_number,
             correlation_id=str(coverage_eligibility_request.external_id),
             status="request.initiated",
+            workflow_id="1",
             log_type="coverage_eligibility_request_check",
         )
 
