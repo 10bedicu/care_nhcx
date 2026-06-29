@@ -106,7 +106,7 @@ DEFAULTS = {
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
     "PAYER": "PMJAY",  # DUMMY | PMJAY
     "LOGS_DIR": str(NHCX_PLUGIN_ROOT / "logs"),
-    "NHCX_DEBUG": False,
+    "NHCX_DEBUG": True,
 }
 
 plugin_settings = PluginSettings(
