@@ -360,6 +360,10 @@ class CoverageEligibilityRequestListSpec(CoverageEligibilityRequestBaseSpec):
             mapping["updated_by"] = UserSpec.serialize(obj.updated_by).to_json()
 
 
+class CoverageEligibilityRequestLinkEncounterSpec(BaseModel):
+    encounter: UUID4
+
+
 class CoverageEligibilityRequestRetrieveSpec(CoverageEligibilityRequestListSpec):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):

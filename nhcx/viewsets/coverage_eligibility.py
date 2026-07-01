@@ -1,6 +1,8 @@
 import json
 
+from care.emr.models.encounter import Encounter
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters as drf_filters
@@ -21,9 +23,12 @@ from nhcx.models.coverage_eligibility import CoverageEligibilityRequest
 from nhcx.services.gateway import GatewayService
 from nhcx.specs.coverage_eligibility import (
     CoverageEligibilityRequestCreateSpec,
+    CoverageEligibilityRequestLinkEncounterSpec,
     CoverageEligibilityRequestListSpec,
     CoverageEligibilityRequestRetrieveSpec,
 )
+from nhcx.utils.coverage_eligibility_dedupe import dedupe_requests_by_policy
+from nhcx.utils.coverage_eligibility_link import link_encounter_to_request
 from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
@@ -35,6 +40,8 @@ class CoverageEligibilityRequestFilter(filters.FilterSet):
     patient = filters.UUIDFilter(field_name="patient__external_id")
     facility = filters.UUIDFilter(field_name="provider__facility__external_id")
     purpose = filters.CharFilter(method="filter_purpose")
+    created_after = filters.IsoDateTimeFilter(field_name="created_date", lookup_expr="gte")
+    encounter__isnull = filters.BooleanFilter(field_name="encounter", lookup_expr="isnull")
 
     def filter_encounter(self, queryset, name, value):
         return queryset.filter(
@@ -75,6 +82,23 @@ class CoverageEligibilityRequestViewSet(
                 "This coverage eligibility request has already been submitted "
                 "to the payer and can no longer be removed."
             )
+
+    def list(self, request, *args, **kwargs):
+        unique_by_policy = request.query_params.get(
+            "unique_by_policy", ""
+        ).lower() in {"true", "1", "yes"}
+        if not unique_by_policy:
+            return super().list(request, *args, **kwargs)
+
+        queryset = self.filter_queryset(self.get_queryset())
+        deduped = dedupe_requests_by_policy(list(queryset))
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(deduped, request)
+        if page is not None:
+            data = [self.serialize_list(obj) for obj in page]
+            return paginator.get_paginated_response(data)
+        data = [self.serialize_list(obj) for obj in deduped]
+        return Response(data)
 
     @extend_schema(
         request=None,
@@ -147,6 +171,30 @@ class CoverageEligibilityRequestViewSet(
             GatewayService.coverage_eligibility__check,
             encrypted_payload,
         )
+
+        return Response(
+            CoverageEligibilityRequestRetrieveSpec.serialize(
+                coverage_eligibility_request
+            ).model_dump(mode="json"),
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        request=CoverageEligibilityRequestLinkEncounterSpec,
+        responses={200: CoverageEligibilityRequestRetrieveSpec},
+    )
+    @action(detail=True, methods=["POST"], url_path="link_encounter")
+    def link_encounter(self, request, *args, **kwargs):
+        coverage_eligibility_request = self.get_object()
+        body = CoverageEligibilityRequestLinkEncounterSpec.model_validate(
+            request.data
+        )
+        encounter = get_object_or_404(
+            Encounter.objects.select_related("facility", "patient"),
+            external_id=body.encounter,
+        )
+        link_encounter_to_request(coverage_eligibility_request, encounter)
+        coverage_eligibility_request.refresh_from_db()
 
         return Response(
             CoverageEligibilityRequestRetrieveSpec.serialize(
