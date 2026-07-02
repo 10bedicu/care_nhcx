@@ -278,6 +278,53 @@ class ClaimViewSet(
         reason_code = body.reason_code or default_reprocess_reason_code()
         description = resolve_task_description(claim, body.description, "Reprocess")
 
+        task_input = [
+            {
+                "type": {
+                    "coding": [
+                        {
+                            "system": "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-task-input-type-code",
+                            "code": "claimNumber",
+                        }
+                    ]
+                },
+                "valueString": claim_flow_id,
+            },
+        ]
+
+        if body.amount is not None:
+            task_input.append(
+                {
+                    "type": {
+                        "coding": [
+                            {
+                                "system": "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-task-input-type-code",
+                                "code": "amount",
+                            }
+                        ]
+                    },
+                    "valueMoney": {
+                        "value": body.amount.value,
+                        "currency": body.amount.currency,
+                    },
+                }
+            )
+
+        if body.attachment is not None:
+            task_input.append(
+                {
+                    "type": {
+                        "coding": [
+                            {
+                                "system": "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-task-input-type-code",
+                                "code": "document",
+                            }
+                        ]
+                    },
+                    "value_attachment": str(body.attachment),
+                }
+            )
+
         task = Task.objects.create(
             status="requested",
             intent="order",
@@ -293,19 +340,7 @@ class ClaimViewSet(
             authored_on=datetime.now(UTC),
             description=description,
             reason_code={"coding": [reason_code.model_dump(mode="json")]},
-            input=[
-                {
-                    "type": {
-                        "coding": [
-                            {
-                                "system": "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-task-input-type-code",
-                                "code": "claimNumber",
-                            }
-                        ]
-                    },
-                    "valueString": claim_flow_id,
-                },
-            ],
+            input=task_input,
             output=[],
             claim=claim,
             use_case=TaskUseCaseChoices.REPROCESS_REQUEST,

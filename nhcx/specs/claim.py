@@ -348,11 +348,32 @@ class ClaimPayeeSpec(BaseModel):
     pass
 
 
+class TaskMoneySpec(BaseModel):
+    """A monetary amount attached to a task action (e.g. reprocess dispute)."""
+
+    value: float
+    currency: str = "INR"
+
+
 class ClaimTaskActionRequestSpec(BaseModel):
     """Optional body for claim cancel and reprocess task actions."""
 
     reason_code: Coding | None = None
     description: str | None = None
+    amount: TaskMoneySpec | None = None
+    attachment: UUID4 | None = None
+
+    @field_validator("attachment")
+    @classmethod
+    def _validate_attachment(cls, value: UUID4 | None) -> UUID4 | None:
+        if value is None:
+            return value
+        exists = FileUpload.objects.filter(
+            external_id=value, upload_completed=True
+        ).exists()
+        if not exists:
+            raise ValueError("Attachment file not found or upload is not completed.")
+        return value
 
 
 class ClaimSubmitRequestSpec(BaseModel):

@@ -1496,7 +1496,9 @@ class Fhir:
                 CodeableConcept(**task.reason_code) if task.reason_code else None
             ),
             input=(
-                [TaskInput(**_input) for _input in task.input] if task.input else None
+                [self._task_input(_input) for _input in task.input]
+                if task.input
+                else None
             ),
             output=(
                 [TaskOutput(**output) for output in task.output]
@@ -1504,6 +1506,17 @@ class Fhir:
                 else None
             ),
         )
+
+    def _task_input(self, _input: dict) -> TaskInput:
+        file_id = _input.get("value_attachment")
+        if file_id:
+            rest = {k: v for k, v in _input.items() if k != "value_attachment"}
+            si_file = FileUpload.objects.filter(external_id=file_id).first()
+            return TaskInput(
+                **rest,
+                valueAttachment=self._attachment(si_file) if si_file else None,
+            )
+        return TaskInput(**_input)
 
     def _bundle_entry(self, resource: Resource):
         return BundleEntry(fullUrl=self._reference_url(resource), resource=resource)
