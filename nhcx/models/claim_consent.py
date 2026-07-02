@@ -15,6 +15,13 @@ class ClaimConsent(EMRBaseModel):
         default=ClaimConsentStage.PREAUTHORIZATION,
     )
     payer_id = models.CharField(max_length=100, null=False, blank=False)
+    claim = models.ForeignKey(
+        "nhcx.Claim",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="claim_consents",
+    )
     encounter = models.ForeignKey(
         "emr.Encounter",
         on_delete=models.CASCADE,

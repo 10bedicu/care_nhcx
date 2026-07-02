@@ -16,7 +16,9 @@ from care.emr.resources.payment_reconciliation.spec import (
 
 def resolve_account(claim) -> Account | None:
     account = None
-    if claim.encounter:
+    if getattr(claim, "account", None):
+        account = claim.account
+    if account is None and claim.encounter:
         account = Account.objects.filter(primary_encounter=claim.encounter).first()
     if account is None:
         account = (

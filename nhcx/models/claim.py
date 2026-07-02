@@ -18,6 +18,13 @@ class Claim(EMRBaseModel):
     encounter = models.ForeignKey(
         "emr.Encounter", on_delete=models.CASCADE, null=True, blank=True
     )
+    account = models.ForeignKey(
+        "emr.Account",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="claims",
+    )
     insurer = models.JSONField(default=dict, null=False, blank=False)
     billable_period = models.JSONField(null=True, blank=True)
     related = models.JSONField(default=list, null=True, blank=True)

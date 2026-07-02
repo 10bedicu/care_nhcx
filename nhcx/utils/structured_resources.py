@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from care.emr.models.base import EMRBaseModel
 from care.emr.models.diagnostic_report import DiagnosticReport
+from care.emr.models.encounter import Encounter
 from care.emr.models.patient import Patient
 from care.emr.models.questionnaire import QuestionnaireResponse
 
@@ -57,6 +58,31 @@ def _questionnaire_response_title(model: QuestionnaireResponse) -> str | None:
     return getattr(model.questionnaire, "title", None) if model.questionnaire else None
 
 
+_INPATIENT_ENCOUNTER_CLASSES = ("imp", "obsenc", "emerg")
+
+
+def _resolve_encounter(resource_id: UUID, patient: Patient) -> Encounter | None:
+    return Encounter.objects.filter(external_id=resource_id, patient=patient).first()
+
+
+def _encounter_is_inpatient(model: Encounter) -> bool:
+    return (model.encounter_class or "") in _INPATIENT_ENCOUNTER_CLASSES
+
+
+def _build_encounter_record(fhir: AbdmFhir, model: Encounter) -> Bundle:
+    if _encounter_is_inpatient(model):
+        return fhir.create_discharge_summary_record(model)
+    return fhir.create_op_consult_record(model)
+
+
+def _encounter_title(model: Encounter) -> str | None:
+    return (
+        "Discharge Summary"
+        if _encounter_is_inpatient(model)
+        else "OP Consultation Record"
+    )
+
+
 REGISTRY: dict[str, StructuredResourceHandler] = {
     "diagnostic_report": StructuredResourceHandler(
         resource_type="diagnostic_report",
@@ -71,6 +97,13 @@ REGISTRY: dict[str, StructuredResourceHandler] = {
         resolve=_resolve_questionnaire_response,
         build_record=lambda fhir, model: fhir.create_wellness_record(model),
         build_title=_questionnaire_response_title,
+    ),
+    "encounter": StructuredResourceHandler(
+        resource_type="encounter",
+        title="Encounter Record",
+        resolve=_resolve_encounter,
+        build_record=_build_encounter_record,
+        build_title=_encounter_title,
     ),
 }
 

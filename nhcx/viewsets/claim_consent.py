@@ -1,23 +1,39 @@
 from django.shortcuts import get_object_or_404
+from django_filters import rest_framework as filters
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
+from care.emr.api.viewsets.base import (
+    EMRBaseViewSet,
+    EMRListMixin,
+    EMRRetrieveMixin,
+)
 from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
 from nhcx.specs.claim_consent import ClaimConsentRetrieveSpec
 
 
-class ClaimConsentViewSet(EMRRetrieveMixin, EMRBaseViewSet):
+class ClaimConsentFilter(filters.FilterSet):
+    claim = filters.UUIDFilter(field_name="claim__external_id")
+    encounter = filters.UUIDFilter(field_name="encounter__external_id")
+    patient = filters.UUIDFilter(field_name="patient__external_id")
+    payer_id = filters.CharFilter(field_name="payer_id")
+    stage = filters.CharFilter(field_name="stage")
+
+
+class ClaimConsentViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
     database_model = ClaimConsent
+    pydantic_read_model = ClaimConsentRetrieveSpec
     pydantic_retrieve_model = ClaimConsentRetrieveSpec
+    filter_backends = [filters.DjangoFilterBackend]
+    filterset_class = ClaimConsentFilter
 
     def get_queryset(self):
         return (
             self.database_model.objects.filter(deleted=False)
-            .select_related("encounter", "patient", "encounter__facility")
+            .select_related("encounter", "patient", "encounter__facility", "claim")
             .order_by("-modified_date")
         )
 

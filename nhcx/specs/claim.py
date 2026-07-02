@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from pydantic import UUID4, BaseModel, Field, field_validator, model_validator
 from rest_framework.exceptions import ValidationError
 
+from care.emr.models.account import Account
 from care.emr.models.charge_item import ChargeItem
 from care.emr.models.condition import Condition
 from care.emr.models.encounter import Encounter
@@ -392,7 +393,7 @@ def resolve_task_description(claim: Claim, description: str | None, action: str)
 
 class ClaimBaseSpec(EMRResource):
     __model__ = Claim
-    __exclude__ = ["patient", "provider", "encounter"]
+    __exclude__ = ["patient", "provider", "encounter", "account"]
     __store_metadata__ = True
 
     id: UUID4 | None = None
@@ -410,6 +411,7 @@ class ClaimCreateSpec(ClaimBaseSpec):
     facility: UUID4
     patient: UUID4
     encounter: UUID4 | None = None
+    account: UUID4 | None = None
     billable_period: PeriodSpec | None = None
     related: list[ClaimRelatedSpec] = []
     care_team: list[ClaimCareTeamSpec] = []
@@ -427,6 +429,13 @@ class ClaimCreateSpec(ClaimBaseSpec):
     def validate_encounter(cls, value):
         if value and not Encounter.objects.filter(external_id=value).exists():
             raise ValidationError("Encounter not found")
+        return value
+
+    @field_validator("account")
+    @classmethod
+    def validate_account(cls, value):
+        if value and not Account.objects.filter(external_id=value).exists():
+            raise ValidationError("Account not found")
         return value
 
     @field_validator("patient")
@@ -571,6 +580,16 @@ class ClaimCreateSpec(ClaimBaseSpec):
         if self.encounter:
             obj.encounter = get_object_or_404(Encounter, external_id=self.encounter)
 
+        if self.account:
+            obj.account = get_object_or_404(Account, external_id=self.account)
+        elif obj.encounter is not None:
+            # Fall back to the account whose primary encounter is this encounter
+            # so account-scoped queries (e.g. cyclical pre-auth cards) work even
+            # when the client does not pass an explicit account.
+            obj.account = Account.objects.filter(
+                primary_encounter=obj.encounter
+            ).first()
+
         obj.patient = get_object_or_404(Patient, external_id=self.patient)
         obj.provider = get_object_or_404(Provider, facility__external_id=self.facility)
 
@@ -656,6 +675,7 @@ class ClaimListSpec(ClaimBaseSpec):
     provider: UUID4
     patient: UUID4
     encounter: UUID4 | None = None
+    account: UUID4 | None = None
     latest_response: dict | None = None
     payment_received: bool = False
     is_paid: bool = False
@@ -674,6 +694,7 @@ class ClaimListSpec(ClaimBaseSpec):
         mapping["provider"] = obj.provider.external_id
         mapping["patient"] = obj.patient.external_id
         mapping["encounter"] = obj.encounter.external_id if obj.encounter else None
+        mapping["account"] = obj.account.external_id if obj.account else None
 
         latest_response = (
             ClaimResponse.objects.filter(request=obj).order_by("-created_date").first()

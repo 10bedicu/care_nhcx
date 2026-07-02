@@ -42,6 +42,7 @@ from nhcx.utils.workflow_codes import (
 
 class ClaimFilter(filters.FilterSet):
     encounter = filters.UUIDFilter(field_name="encounter__external_id")
+    account = filters.UUIDFilter(field_name="account__external_id")
     patient = filters.UUIDFilter(field_name="patient__external_id")
     facility = filters.UUIDFilter(field_name="provider__facility__external_id")
 
