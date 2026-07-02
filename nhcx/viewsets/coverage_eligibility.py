@@ -159,7 +159,9 @@ class CoverageEligibilityRequestViewSet(
             data=fhir_payload,
             sender_code=coverage_eligibility_request.provider.participant_code,
             recipient_code=coverage_eligibility_request.insurer.get("participant_code"),
-            patient_abha_number=coverage_eligibility_request.patient.abha_number.abha_number,
+            patient_abha_number=coverage_eligibility_request.insurance[0]
+            .get("policy", {})
+            .get("abhanumber"),
             correlation_id=str(coverage_eligibility_request.external_id),
             status="request.initiated",
             workflow_id="1",

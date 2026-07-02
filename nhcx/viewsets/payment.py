@@ -96,7 +96,7 @@ class PaymentViewSet(EMRBaseViewSet):
             data=fhir_payload,
             sender_code=claim.provider.participant_code,
             recipient_code=claim.insurer.get("participant_code"),
-            patient_abha_number=claim.patient.abha_number.abha_number,
+            patient_abha_number=claim.insurance[0].get("policy", {}).get("abhanumber"),
             correlation_id=previous_task.meta.get("raw_headers", {}).get(
                 "x-hcx-correlation_id"
             ),
