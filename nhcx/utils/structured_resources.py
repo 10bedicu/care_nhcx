@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from care.emr.models.base import EMRBaseModel
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
+from care.emr.models.invoice import Invoice
 from care.emr.models.patient import Patient
 from care.emr.models.questionnaire import QuestionnaireResponse
 
@@ -83,6 +84,14 @@ def _encounter_title(model: Encounter) -> str | None:
     )
 
 
+def _resolve_invoice(resource_id: UUID, patient: Patient) -> Invoice | None:
+    return Invoice.objects.filter(external_id=resource_id, patient=patient).first()
+
+
+def _invoice_title(model: Invoice) -> str | None:
+    return model.title or model.number
+
+
 REGISTRY: dict[str, StructuredResourceHandler] = {
     "diagnostic_report": StructuredResourceHandler(
         resource_type="diagnostic_report",
@@ -104,6 +113,13 @@ REGISTRY: dict[str, StructuredResourceHandler] = {
         resolve=_resolve_encounter,
         build_record=_build_encounter_record,
         build_title=_encounter_title,
+    ),
+    "invoice": StructuredResourceHandler(
+        resource_type="invoice",
+        title="Invoice Record",
+        resolve=_resolve_invoice,
+        build_record=lambda fhir, model: fhir.create_invoice_record(model),
+        build_title=_invoice_title,
     ),
 }
 
