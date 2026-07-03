@@ -24,6 +24,7 @@ class CoverageEligibilityRequest(EMRBaseModel):
     supporting_info = models.JSONField(default=list, null=True, blank=True)
     insurance = models.JSONField(default=list, null=False, blank=False)
     item = models.JSONField(default=list, null=True, blank=True)
+    is_automatic = models.BooleanField(default=False, db_index=True)
     workflow_code = models.CharField(max_length=8, null=True, blank=True, db_index=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     dispatch_error = models.TextField(blank=True, default="")

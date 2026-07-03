@@ -2067,6 +2067,19 @@ class Fhir:
             # "queued" leaves dispatch_status unchanged (stays AWAITING)
             claim_instance.save(update_fields=["dispatch_status", "modified_date"])
 
+            if claim_instance.use == "claim" and outcome != "queued":
+                try:
+                    from nhcx.utils.coverage_eligibility_check import (
+                        create_automatic_wallet_check,
+                    )
+
+                    create_automatic_wallet_check(claim_instance)
+                except Exception:
+                    logger.exception(
+                        "Automatic wallet balance check failed for claim %s",
+                        claim_instance.external_id,
+                    )
+
         return (claim_response_instance, claim_instance)
 
     def process_communication_request(self, response: dict, headers: dict):
