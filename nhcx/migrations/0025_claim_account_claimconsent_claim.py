@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('emr', '0078_merge_20260409_1618'),
+        ('emr', '0077_tagconfig_metadata'),
         ('nhcx', '0024_claim_workflow_code_claimresponse_workflow_code_and_more'),
     ]
 
