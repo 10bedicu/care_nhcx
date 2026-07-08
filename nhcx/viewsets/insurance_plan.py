@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime
 from itertools import chain
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
@@ -67,7 +68,12 @@ class InsurancePlanBenefitFilter(filters.FilterSet):
     specialty_category_code = filters.CharFilter()
     procedure_type = filters.CharFilter()
 
-    q = filters.CharFilter(field_name="type_display", lookup_expr="icontains")
+    q = filters.CharFilter(method="filter_q")
+
+    def filter_q(self, queryset, name, value):
+        return queryset.filter(
+            Q(type_display__icontains=value) | Q(type_code__icontains=value)
+        )
 
     min_cost_gte = filters.NumberFilter(field_name="min_cost", lookup_expr="gte")
     max_cost_lte = filters.NumberFilter(field_name="max_cost", lookup_expr="lte")

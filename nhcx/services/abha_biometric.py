@@ -17,7 +17,7 @@ from nhcx.utils.exceptions import NHCXAPIException
 
 
 class AbhaBiometricService:
-    request = Request(" https://apisbx.abdm.gov.in/hcx")
+    request = Request("https://apisbx.abdm.gov.in/hcx")
 
     SCOPE_MAP = {
         "FINGERPRINT": "bio",
