@@ -555,6 +555,23 @@ class Fhir:
             data=base64.b64encode(content),
         )
 
+    def _inline_attachment(self, inline: dict | None):
+        if not inline:
+            return None
+        return Attachment(
+            data=inline.get("data"),
+            contentType=inline.get("content_type"),
+            title=inline.get("title"),
+        )
+
+    def _content_attachment(self, content_attachment):
+        if not content_attachment:
+            return None
+        if isinstance(content_attachment, dict):
+            return self._inline_attachment(content_attachment)
+        file = FileUpload.objects.filter(external_id=content_attachment).first()
+        return self._attachment(file) if file else None
+
     def _coding(self, coding: CodingSpec | None):
         if coding is None:
             return None
@@ -605,11 +622,17 @@ class Fhir:
             content=[
                 DocumentReferenceContent(
                     attachment=Attachment(
-                        contentType=content_type, data=base64.b64encode(content)
+                        title=file.name or file.internal_name,
+                        contentType=content_type,
+                        data=base64.b64encode(content),
                     )
                 )
             ],
-            author=[self._reference(self._practitioner(file.created_by))],
+            author=(
+                [self._reference(self._practitioner(file.created_by))]
+                if file.created_by
+                else None
+            ),
         )
 
     class CoverageModel(BaseModel):
@@ -716,14 +739,8 @@ class Fhir:
             payload=[
                 CommunicationPayload(
                     contentString=payload.get("content_string"),
-                    contentAttachment=(
-                        self._attachment(
-                            FileUpload.objects.filter(
-                                external_id=payload.get("content_attachment")
-                            ).first()
-                        )
-                        if payload.get("content_attachment")
-                        else None
+                    contentAttachment=self._content_attachment(
+                        payload.get("content_attachment")
                     ),
                 )
                 for payload in communication.payload
@@ -903,15 +920,8 @@ class Fhir:
                         if answer.get("value_quantity")
                         else None
                     ),
-                    valueAttachment=(
-                        self._attachment(file_upload)
-                        if answer.get("value_attachment")
-                        and (
-                            file_upload := FileUpload.objects.filter(
-                                external_id=answer.get("value_attachment")
-                            ).first()
-                        )
-                        else None
+                    valueAttachment=self._content_attachment(
+                        answer.get("value_attachment")
                     ),
                 )
                 for answer in item.get("answer", [])
@@ -1508,13 +1518,12 @@ class Fhir:
         )
 
     def _task_input(self, _input: dict) -> TaskInput:
-        file_id = _input.get("value_attachment")
-        if file_id:
+        attachment = _input.get("value_attachment")
+        if attachment:
             rest = {k: v for k, v in _input.items() if k != "value_attachment"}
-            si_file = FileUpload.objects.filter(external_id=file_id).first()
             return TaskInput(
                 **rest,
-                valueAttachment=self._attachment(si_file) if si_file else None,
+                valueAttachment=self._content_attachment(attachment),
             )
         return TaskInput(**_input)
 
@@ -1600,11 +1609,7 @@ class Fhir:
             if document_reference is not None:
                 value_reference = self._reference(document_reference)
 
-        si_file = None
-        if supporting_info.get("value_attachment"):
-            si_file = FileUpload.objects.filter(
-                external_id=supporting_info.get("value_attachment")
-            ).first()
+        si_attachment = supporting_info.get("value_attachment")
 
         return ClaimSupportingInfo(
             sequence=supporting_info.get("sequence"),
@@ -1620,7 +1625,7 @@ class Fhir:
                 else None
             ),
             valueString=supporting_info.get("value_string"),
-            valueAttachment=self._attachment(si_file) if si_file else None,
+            valueAttachment=self._content_attachment(si_attachment),
             valueReference=value_reference,
         )
 

@@ -321,7 +321,7 @@ class ClaimViewSet(
                             }
                         ]
                     },
-                    "value_attachment": str(body.attachment),
+                    "value_attachment": body.attachment.model_dump(),
                 }
             )
 

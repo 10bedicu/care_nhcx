@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 from enum import Enum
 from uuid import uuid4
@@ -183,6 +184,42 @@ class ClaimSupportingInfoResourceSpec(BaseModel):
             raise ValidationError(msg)
         return value
 
+ALLOWED_ATTACHMENT_MIME_TYPES = {
+    "application/pdf",
+    "image/jpg",
+    "image/jpeg",
+    "image/png",
+}
+
+
+class InlineAttachmentSpec(BaseModel):
+    """A file attachment carried inline as base64 rather than an upload id."""
+
+    data: str  # base64-encoded, without the data-URL prefix
+    content_type: str
+    title: str | None = None
+
+    @field_validator("content_type")
+    @classmethod
+    def validate_content_type(cls, value):
+        if value not in ALLOWED_ATTACHMENT_MIME_TYPES:
+            msg = (
+                f"Unsupported attachment type '{value}'. Allowed: PDF, JPG, JPEG, PNG."
+            )
+            raise ValidationError(msg)
+        return value
+
+    @field_validator("data")
+    @classmethod
+    def validate_data(cls, value):
+        if not value:
+            raise ValidationError("Attachment data cannot be empty")
+        try:
+            base64.b64decode(value, validate=True)
+        except Exception as e:
+            raise ValidationError("Invalid base64 attachment data") from e
+        return value
+
 
 class ClaimSupportingInfoSpec(BaseModel):
     sequence: int
@@ -190,15 +227,8 @@ class ClaimSupportingInfoSpec(BaseModel):
     code: dict
     timing: PeriodSpec | None = None
     value_string: str | None = None
-    value_attachment: UUID4 | None = None
+    value_attachment: InlineAttachmentSpec | None = None
     value_resource: ClaimSupportingInfoResourceSpec | None = None
-
-    @field_validator("value_attachment")
-    @classmethod
-    def validate_value_attachment(cls, value):
-        if value and not FileUpload.objects.filter(external_id=value).exists():
-            raise ValidationError("File upload not found")
-        return value
 
     @model_validator(mode="after")
     def validate_single_value(self):
@@ -253,7 +283,7 @@ class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
     value_time: str | None = None
     value_string: str | None = None
     value_uri: str | None = None
-    value_attachment: UUID4 | None = None
+    value_attachment: InlineAttachmentSpec | None = None
     value_coding: dict | None = None
     value_quantity: dict | None = None
 
@@ -276,13 +306,6 @@ class ClaimQuestionnaireResponseAnswerSpec(BaseModel):
         if len(non_null) > 1:
             raise ValidationError("At most one value field may be set on each answer")
         return self
-
-    @field_validator("value_attachment")
-    @classmethod
-    def validate_value_attachment(cls, value):
-        if value and not FileUpload.objects.filter(external_id=value).exists():
-            raise ValidationError("File upload not found")
-        return value
 
 
 class ClaimQuestionnaireResponseItemSpec(BaseModel):
@@ -361,19 +384,7 @@ class ClaimTaskActionRequestSpec(BaseModel):
     reason_code: Coding | None = None
     description: str | None = None
     amount: TaskMoneySpec | None = None
-    attachment: UUID4 | None = None
-
-    @field_validator("attachment")
-    @classmethod
-    def _validate_attachment(cls, value: UUID4 | None) -> UUID4 | None:
-        if value is None:
-            return value
-        exists = FileUpload.objects.filter(
-            external_id=value, upload_completed=True
-        ).exists()
-        if not exists:
-            raise ValueError("Attachment file not found or upload is not completed.")
-        return value
+    attachment: InlineAttachmentSpec | None = None
 
 
 class ClaimSubmitRequestSpec(BaseModel):

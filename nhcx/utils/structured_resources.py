@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from care.emr.models.base import EMRBaseModel
 from care.emr.models.diagnostic_report import DiagnosticReport
 from care.emr.models.encounter import Encounter
+from care.emr.models.file_upload import FileUpload
 from care.emr.models.invoice import Invoice
 from care.emr.models.patient import Patient
 from care.emr.models.questionnaire import QuestionnaireResponse
@@ -92,6 +93,28 @@ def _invoice_title(model: Invoice) -> str | None:
     return model.title or model.number
 
 
+def _resolve_file(resource_id: UUID, patient: Patient) -> FileUpload | None:
+    file = FileUpload.objects.filter(external_id=resource_id).first()
+    if not file:
+        return None
+    if file.file_type == "patient" and str(file.associating_id) == str(
+        patient.external_id
+    ):
+        return file
+    if (
+        file.file_type == "encounter"
+        and Encounter.objects.filter(
+            external_id=file.associating_id, patient=patient
+        ).exists()
+    ):
+        return file
+    return None
+
+
+def _file_title(model: FileUpload) -> str | None:
+    return model.name or (model.internal_name or "").split(".")[0] or None
+
+
 REGISTRY: dict[str, StructuredResourceHandler] = {
     "diagnostic_report": StructuredResourceHandler(
         resource_type="diagnostic_report",
@@ -120,6 +143,13 @@ REGISTRY: dict[str, StructuredResourceHandler] = {
         resolve=_resolve_invoice,
         build_record=lambda fhir, model: fhir.create_invoice_record(model),
         build_title=_invoice_title,
+    ),
+    "file": StructuredResourceHandler(
+        resource_type="file",
+        title="Document",
+        resolve=_resolve_file,
+        build_record=lambda fhir, model: fhir.create_health_document_record(model),
+        build_title=_file_title,
     ),
 }
 

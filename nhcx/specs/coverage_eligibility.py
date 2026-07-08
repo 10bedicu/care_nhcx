@@ -25,6 +25,7 @@ from nhcx.models.coverage_eligibility import (
 from nhcx.models.provider import Provider
 from nhcx.services.participant import ParticipantService
 from nhcx.services.types.participant import Policy, SearchParticipantBody
+from nhcx.specs.claim import InlineAttachmentSpec
 from nhcx.specs.valuesets.coverage_eligibility import (
     NHCX_COVERAGE_ELIGIBILITY_REQUEST_ITEM_DIAGNOSIS_CODE_VALUESET,
 )
@@ -54,14 +55,7 @@ class CoverageEligibilityRequestPurposeChoices(str, Enum):
 class CoverageEligibilityRequestSupportingInfoSpec(BaseModel):
     sequence: int
     value_string: str | None = None
-    value_attachment: UUID4 | None = None
-
-    @field_validator("value_attachment")
-    @classmethod
-    def validate_value_attachment(cls, value):
-        if value and not FileUpload.objects.filter(external_id=value).exists():
-            raise ValidationError("File upload not found")
-        return value
+    value_attachment: InlineAttachmentSpec | None = None
 
     @model_validator(mode="after")
     def validate_value_string_or_attachment(self):
