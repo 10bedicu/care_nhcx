@@ -24,7 +24,10 @@ from nhcx.specs.coverage_eligibility import (
     CoverageEligibilityRequestListSpec,
     CoverageEligibilityRequestRetrieveSpec,
 )
-from nhcx.utils.coverage_eligibility_check import dispatch_coverage_eligibility_check
+from nhcx.utils.coverage_eligibility_check import (
+    create_wallet_check_from_request,
+    dispatch_coverage_eligibility_check,
+)
 from nhcx.utils.coverage_eligibility_dedupe import dedupe_requests_by_policy
 from nhcx.utils.coverage_eligibility_link import link_encounter_to_request
 
@@ -131,9 +134,6 @@ class CoverageEligibilityRequestViewSet(
                 )
                 coverage_eligibility_request.save(update_fields=["encounter"])
 
-        # An encounter anchors auth-requirements / claim flows. A pure validation
-        # check (wallet balance + demographic verification) can run before an
-        # encounter exists, e.g. at registration / appointment time.
         requires_encounter = "auth-requirements" in coverage_eligibility_request.purpose
         if requires_encounter and not coverage_eligibility_request.encounter_id:
             raise ValidationError(
@@ -146,6 +146,23 @@ class CoverageEligibilityRequestViewSet(
             CoverageEligibilityRequestRetrieveSpec.serialize(
                 coverage_eligibility_request
             ).model_dump(mode="json"),
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        request=None,
+        responses={200: CoverageEligibilityRequestRetrieveSpec},
+    )
+    @action(detail=True, methods=["POST"], url_path="wallet_check")
+    def wallet_check(self, request, *args, **kwargs):
+        source = self.get_object()
+
+        wallet_request = create_wallet_check_from_request(source)
+
+        return Response(
+            CoverageEligibilityRequestRetrieveSpec.serialize(wallet_request).model_dump(
+                mode="json"
+            ),
             status=status.HTTP_200_OK,
         )
 

@@ -86,3 +86,33 @@ def create_automatic_wallet_check(claim) -> CoverageEligibilityRequest | None:
     dispatch_coverage_eligibility_check(request)
 
     return request
+
+
+def create_wallet_check_from_request(
+    source: CoverageEligibilityRequest,
+) -> CoverageEligibilityRequest:
+    """Clone a validation request's policy into a fresh automatic wallet check
+    and submit it to the payer.
+
+    Marked ``is_automatic=True`` so it only feeds the wallet balance card and
+    never appears as a timeline entry, matching system-initiated refreshes.
+    """
+    request = CoverageEligibilityRequest.objects.create(
+        status="active",
+        priority="normal",
+        purpose=["validation"],
+        provider=source.provider,
+        patient=source.patient,
+        encounter=source.encounter,
+        insurer=source.insurer,
+        insurance=source.insurance,
+        supporting_info=[],
+        item=[],
+        is_automatic=True,
+        created_by=source.created_by,
+        updated_by=source.updated_by,
+    )
+
+    dispatch_coverage_eligibility_check(request)
+
+    return request
