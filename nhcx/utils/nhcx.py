@@ -27,6 +27,7 @@ class NHCX:
         request_id: str | None
         api_call_id: str | None
         workflow_id: str | None
+        user_token: str | None
         status: (
             Literal[
                 "request.initiated",
@@ -62,7 +63,7 @@ class NHCX:
         if not correlation_id:
             raise NHCXInternalException("Correlation ID is mandatory in headers")
 
-        return {
+        headers = {
             "alg": "RSA-OAEP-256",
             "enc": "A256GCM",
             "x-hcx-timestamp": datetime.now()
@@ -81,6 +82,12 @@ class NHCX:
             "x-hcx-error_details": header_params.get("error_details") or None,
             "x-hcx-debug_details": header_params.get("debug_details") or None,
         }
+
+        user_token = header_params.get("user_token")
+        if user_token:
+            headers["x-user-token"] = user_token
+
+        return headers
 
     @staticmethod
     def encrypt(

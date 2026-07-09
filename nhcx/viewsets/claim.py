@@ -30,6 +30,7 @@ from nhcx.specs.claim import (
     resolve_task_description,
 )
 from nhcx.specs.task import TaskListSpec, TaskRetrieveSpec
+from nhcx.utils.biometric_token import ensure_valid_biometric_token
 from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
@@ -102,17 +103,6 @@ class ClaimViewSet(
 
         fhir_payload = json.loads(fhir_data.json())
 
-        encrypted_payload = NHCX.encrypt(
-            data=fhir_payload,
-            sender_code=claim.provider.participant_code,
-            recipient_code=claim.insurer.get("participant_code"),
-            patient_abha_number=claim.insurance[0].get("policy", {}).get("abhanumber"),
-            correlation_id=str(claim.external_id),
-            status="request.initiated",
-            workflow_id=workflow_code.value,
-            log_type="claim_submit",
-        )
-
         consent_stage = (
             ClaimConsentStage.CLAIM
             if claim.use == ClaimUseChoices.CLAIM
@@ -124,28 +114,38 @@ class ClaimViewSet(
             payer_id=claim.insurer.get("participant_code"),
             stage=consent_stage,
         ).first()
+        claim_consent = ensure_valid_biometric_token(claim_consent)
         biometric_auth_token = claim_consent.token if claim_consent else None
+
+        encrypted_payload = NHCX.encrypt(
+            data=fhir_payload,
+            sender_code=claim.provider.participant_code,
+            recipient_code=claim.insurer.get("participant_code"),
+            patient_abha_number=claim.insurance[0].get("policy", {}).get("abhanumber"),
+            correlation_id=str(claim.external_id),
+            status="request.initiated",
+            workflow_id=workflow_code.value,
+            user_token=biometric_auth_token,
+            log_type="claim_submit",
+        )
 
         if claim.use == ClaimUseChoices.CLAIM:
             dispatch(
                 claim,
                 GatewayService.claim__submit,
                 encrypted_payload,
-                biometric_auth_token,
             )
         elif claim.use == ClaimUseChoices.PRE_AUTHORIZATION:
             dispatch(
                 claim,
                 GatewayService.pre_auth__submit,
                 encrypted_payload,
-                biometric_auth_token,
             )
         elif claim.use == ClaimUseChoices.PRE_DETERMINATION:
             dispatch(
                 claim,
                 GatewayService.predetermination__submit,
                 encrypted_payload,
-                biometric_auth_token,
             )
 
         return Response(

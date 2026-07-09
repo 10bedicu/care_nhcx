@@ -72,18 +72,13 @@ class GatewayService:
         return response.json()
 
     @staticmethod
-    def predetermination__submit(
-        payload: str, biometric_auth_token: str | None = None
-    ) -> dict:
+    def predetermination__submit(payload: str) -> dict:
         path = "/predeterminationhcxservice/v1/predetermination/submit"
 
         response = GatewayService.request.post(
             path,
             {"payload": payload},
-            headers={
-                **GatewayService.headers(),
-                "X-User-Token": biometric_auth_token,
-            },
+            headers=GatewayService.headers(),
         )
 
         if response.status_code != status.HTTP_202_ACCEPTED:
@@ -92,16 +87,13 @@ class GatewayService:
         return response.json()
 
     @staticmethod
-    def pre_auth__submit(payload: str, biometric_auth_token: str | None = None) -> dict:
+    def pre_auth__submit(payload: str) -> dict:
         path = "/preauthhcxservice/v1/preauth/submit"
 
         response = GatewayService.request.post(
             path,
             {"payload": payload},
-            headers={
-                **GatewayService.headers(),
-                "X-User-Token": biometric_auth_token,
-            },
+            headers=GatewayService.headers(),
         )
 
         if response.status_code != status.HTTP_202_ACCEPTED:
@@ -110,16 +102,13 @@ class GatewayService:
         return response.json()
 
     @staticmethod
-    def claim__submit(payload: str, biometric_auth_token: str | None = None) -> dict:
+    def claim__submit(payload: str) -> dict:
         path = "/claimhcxservice/v1/claim/submit"
 
         response = GatewayService.request.post(
             path,
             {"payload": payload},
-            headers={
-                **GatewayService.headers(),
-                "X-User-Token": biometric_auth_token,
-            },
+            headers=GatewayService.headers(),
         )
 
         if response.status_code != status.HTTP_202_ACCEPTED:
