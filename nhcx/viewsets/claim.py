@@ -6,6 +6,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import filters as drf_filters
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import (
@@ -14,6 +15,7 @@ from care.emr.api.viewsets.base import (
     EMRListMixin,
     EMRRetrieveMixin,
 )
+from nhcx.models import DispatchStatusChoices
 from nhcx.models.claim import Claim
 from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
 from nhcx.models.task import Task, TaskUseCaseChoices
@@ -269,6 +271,19 @@ class ClaimViewSet(
         claim_flow_id = (claim.meta or {}).get("claim_flow_id") or str(
             claim.external_id
         )
+
+        if (
+            Task.objects.filter(
+                claim=claim, use_case=TaskUseCaseChoices.REPROCESS_REQUEST
+            )
+            .exclude(dispatch_status=DispatchStatusChoices.ERROR)
+            .exists()
+        ):
+            raise ValidationError(
+                {
+                    "detail": "A reprocess request has already been raised for this claim."
+                }
+            )
 
         workflow_code = resolve_reprocess_workflow(claim)
 

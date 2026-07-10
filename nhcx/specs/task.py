@@ -4,10 +4,12 @@ from pydantic import UUID4
 
 from care.emr.resources.base import EMRResource
 from care.emr.resources.user.spec import UserSpec
+from nhcx.models.claim import ClaimResponse
 from nhcx.models.communication import Communication, CommunicationRequest
 from nhcx.models.insurance_plan import InsurancePlan
 from nhcx.models.payment import PaymentNotice
 from nhcx.models.task import Task
+from nhcx.specs.claim import ClaimResponseRetrieveSpec
 from nhcx.specs.communication import (
     CommunicationRequestRetrieveSpec,
     CommunicationRetrieveSpec,
@@ -72,6 +74,10 @@ class TaskListSpec(TaskBaseSpec):
                 ).to_json()
             if isinstance(obj.focus, InsurancePlan):
                 mapping["focus"] = InsurancePlanRetrieveSpec.serialize(
+                    obj.focus
+                ).to_json()
+            if isinstance(obj.focus, ClaimResponse):
+                mapping["focus"] = ClaimResponseRetrieveSpec.serialize(
                     obj.focus
                 ).to_json()
 
