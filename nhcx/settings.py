@@ -107,6 +107,7 @@ DEFAULTS = {
     "PAYER": "PMJAY",  # DUMMY | PMJAY
     "LOGS_DIR": str(NHCX_PLUGIN_ROOT / "logs"),
     "NHCX_DEBUG": True,
+    "NHCX_USERNAME": "nhcx_user_internal",
 }
 
 plugin_settings = PluginSettings(

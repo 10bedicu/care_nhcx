@@ -5,6 +5,7 @@ from nhcx.services.gateway import GatewayService
 from nhcx.utils.dispatch import dispatch
 from nhcx.utils.fhir import Fhir
 from nhcx.utils.nhcx import NHCX
+from nhcx.utils.user import get_or_create_nhcx_user
 
 
 def dispatch_coverage_eligibility_check(
@@ -69,6 +70,8 @@ def create_automatic_wallet_check(claim) -> CoverageEligibilityRequest | None:
     if source is None:
         return None
 
+    nhcx_user = get_or_create_nhcx_user()
+
     request = CoverageEligibilityRequest.objects.create(
         status="active",
         priority="normal",
@@ -81,6 +84,8 @@ def create_automatic_wallet_check(claim) -> CoverageEligibilityRequest | None:
         supporting_info=[],
         item=[],
         is_automatic=True,
+        created_by=nhcx_user,
+        updated_by=nhcx_user,
     )
 
     dispatch_coverage_eligibility_check(request)
@@ -97,6 +102,7 @@ def create_wallet_check_from_request(
     Marked ``is_automatic=True`` so it only feeds the wallet balance card and
     never appears as a timeline entry, matching system-initiated refreshes.
     """
+
     request = CoverageEligibilityRequest.objects.create(
         status="active",
         priority="normal",
