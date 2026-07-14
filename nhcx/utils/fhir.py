@@ -16,6 +16,7 @@ from fhir.resources.R4B.claim import (
     ClaimDiagnosis,
     ClaimInsurance,
     ClaimItem,
+    ClaimItemDetail,
     ClaimPayee,
     ClaimProcedure,
     ClaimRelated,
@@ -1452,6 +1453,25 @@ class Fhir:
                             currency="INR",
                         ),
                         factor=item.get("factor"),
+                        detail=(
+                            [
+                                ClaimItemDetail(
+                                    sequence=detail_index + 1,
+                                    productOrService=CodeableConcept(
+                                        text=(
+                                            detail.get("productOrService") or {}
+                                        ).get("text"),
+                                    ),
+                                )
+                                for detail_index, detail in enumerate(
+                                    item.get("detail") or []
+                                )
+                                if (detail.get("productOrService") or {}).get(
+                                    "text"
+                                )
+                            ]
+                            or None
+                        ),
                     )
                     for item in claim.item
                 ]

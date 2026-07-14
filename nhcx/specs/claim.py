@@ -263,6 +263,7 @@ class ClaimItemSpec(BaseModel):
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
     factor: float | None = None
+    detail: list[dict] = []
 
     @field_validator("charge_items")
     @classmethod
