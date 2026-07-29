@@ -1,12 +1,28 @@
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, RootModel
-
+from pydantic import BaseModel, ConfigDict, RootModel
 
 class GetPoliciesBody(BaseModel):
     identifiertype: Literal["AbhaNumber", "MemberId", "MobileNo"]
     identifiervalue: str
+
+
+class FetchParticipantsBody(BaseModel):
+    role: Literal["PAYER", "PROVIDER", "TPA"]
+    fromdate: str  # dd/MM/yyyy
+    todate: str  # dd/MM/yyyy
+
+
+class ParticipantSummary(BaseModel):
+    participantcode: str
+    participantname: str
+    address: str | None = None
+    state: str | None = None
+
+
+class FetchParticipantsResponse(BaseModel):
+    participantdetails: list[ParticipantSummary] = []
 
 
 class PolicyPeriod(BaseModel):

@@ -17,8 +17,12 @@ from nhcx.services.types.abha_biometric import (
     AbhaBiometricAuthVerifyApiBody,
     AbhaBiometricAuthVerifyBody,
 )
-from nhcx.services.types.participant import GetPoliciesBody, GetPoliciesResponse
-
+from nhcx.services.types.participant import (
+    FetchParticipantsBody,
+    FetchParticipantsResponse,
+    GetPoliciesBody,
+    GetPoliciesResponse,
+)
 
 class GatewayViewSet(EMRBaseViewSet):
     @action(detail=False, methods=["POST"], url_path="get_policies")
@@ -30,6 +34,16 @@ class GatewayViewSet(EMRBaseViewSet):
         payload = GetPoliciesBody(**request.data)
         response = ParticipantService.get_policies(payload)
         return Response(response.model_dump(mode="json"), status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["POST"], url_path="participants")
+    @extend_schema(
+        request=FetchParticipantsBody,
+        responses={200: FetchParticipantsResponse},
+    )
+    def fetch_participants(self, request, *args, **kwargs):
+        payload = FetchParticipantsBody(**request.data)
+        response = ParticipantService.fetch_participants(payload)
+        return Response(response, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["POST"], url_path="abha-biometric-auth-init")
     @extend_schema(

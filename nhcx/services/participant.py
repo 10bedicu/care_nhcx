@@ -10,6 +10,7 @@ from nhcx.services.types.participant import (
     CreateParticipantResponse,
     FetchCertsBody,
     FetchCertsResponse,
+    FetchParticipantsBody,
     GetPoliciesBody,
     GetPoliciesResponse,
     SearchParticipantBody,
@@ -79,6 +80,22 @@ class ParticipantService:
 
         response_data = response.json()
         return GetPoliciesResponse(response_data)
+
+    @staticmethod
+    def fetch_participants(data: FetchParticipantsBody) -> Any:
+        path = "/fetch/participants/list"
+        response = ParticipantService.request.post(
+            path,
+            data.model_dump(mode="json", exclude_none=True),
+            headers=ParticipantService.headers(),
+        )
+
+        if response.status_code != status.HTTP_200_OK:
+            raise NHCXAPIException(
+                detail=ParticipantService.handle_error(response.json())
+            )
+
+        return response.json()
 
     @staticmethod
     def search_participant(data: SearchParticipantBody) -> SearchParticipantResponse:
