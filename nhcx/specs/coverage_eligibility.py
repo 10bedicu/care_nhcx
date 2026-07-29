@@ -223,7 +223,7 @@ class CoverageEligibilityRequestCreateSpec(CoverageEligibilityRequestBaseSpec):
         try:
             insurer = ParticipantService.search_participant(
                 data=SearchParticipantBody(
-                    participant_code="1518@hcx"  # TODO: REPLACE_AFTER_TESTING: replace this with self.insurance[0].policy.payerid after testing
+                    participant_code=self.insurance[0].policy.payerid
                 )
             )
             obj.insurer = insurer.model_dump(mode="json")
@@ -273,6 +273,8 @@ class InsuranceEntrySpec(BaseModel):
     abha_id: str | None = None
 
     inforce: bool = False
+    coverage_id: str | None = None
+    national_health_id: str | None = None
     plan_name: str | None = None
     plan_id: str | None = None
     policy_period: PeriodSpec | None = None

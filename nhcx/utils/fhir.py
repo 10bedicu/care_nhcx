@@ -583,11 +583,13 @@ class Fhir:
             system=coding.system,
         )
 
-    def _coding_to_codable_concept(self, coding: CodingSpec | None):
+    def _coding_to_codable_concept(
+        self, coding: CodingSpec | None, text: str | None = None
+    ):
         if coding is None:
             return None
 
-        return CodeableConcept(coding=[self._coding(coding)])
+        return CodeableConcept(coding=[self._coding(coding)], text=text)
 
     def _participant_to_payer_organization(self, participant: Participant):
         if participant.participant_id not in self._participants_external_id_map:
@@ -666,7 +668,7 @@ class Fhir:
                         ]
                     ),
                     system="https://payer.nha.gov.in",
-                    value="PMJAY/HP/S/G",
+                    value=coverage.policy.productid,
                 )
             ],
             subscriberId=coverage.policy.memberid,
@@ -1397,7 +1399,7 @@ class Fhir:
                         ),
                         productOrService=(
                             self._coding_to_codable_concept(
-                                CodingSpec(**item.get("product_or_service"))
+                                CodingSpec(**item.get("product_or_service")),
                             )
                             if item.get("product_or_service")
                             else None
@@ -1458,17 +1460,15 @@ class Fhir:
                                 ClaimItemDetail(
                                     sequence=detail_index + 1,
                                     productOrService=CodeableConcept(
-                                        text=(
-                                            detail.get("productOrService") or {}
-                                        ).get("text"),
+                                        text=(detail.get("productOrService") or {}).get(
+                                            "text"
+                                        ),
                                     ),
                                 )
                                 for detail_index, detail in enumerate(
                                     item.get("detail") or []
                                 )
-                                if (detail.get("productOrService") or {}).get(
-                                    "text"
-                                )
+                                if (detail.get("productOrService") or {}).get("text")
                             ]
                             or None
                         ),
@@ -1820,10 +1820,20 @@ class Fhir:
     def _resolve_coverage_fields(coverage_resource: dict | None) -> dict:
         """Extract flat plan fields from a FHIR Coverage resource."""
         if not coverage_resource:
-            return {"plan_name": None, "plan_id": None, "policy_period": None}
+            return {
+                "coverage_id": None,
+                "national_health_id": None,
+                "plan_name": None,
+                "plan_id": None,
+                "policy_period": None,
+            }
         classes = coverage_resource.get("class", [])
         period = coverage_resource.get("period")
         return {
+            "coverage_id": coverage_resource.get("id"),
+            "national_health_id": Fhir._extract_identifier(
+                coverage_resource.get("identifier"), "NH"
+            ),
             "plan_name": classes[0].get("name") if classes else None,
             "plan_id": classes[0].get("value") if classes else None,
             "policy_period": (
