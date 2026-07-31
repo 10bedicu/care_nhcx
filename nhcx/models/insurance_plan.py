@@ -530,6 +530,16 @@ class ClaimCondition(ClaimExtensionBase):
     )
     cyclic_procedure = models.BooleanField(null=True, blank=True)
     maximum_cycles_allowed = models.PositiveSmallIntegerField(null=True, blank=True)
+    standalone = models.BooleanField(null=True, blank=True, db_index=True)
+    # Comma-separated list of parent procedure codes (PMJAY sends "NA" when the
+    # benefit has no parent — normalised to NULL). At least one listed parent
+    # must be present in the same request for this benefit to be claimable.
+    parent_procedure = models.TextField(null=True, blank=True)
+    lama_dama_procedure = models.BooleanField(null=True, blank=True)
+    discharge_stages_lama_dama_procedure = models.CharField(
+        max_length=128, null=True, blank=True
+    )
+    unspecified = models.BooleanField(null=True, blank=True, db_index=True)
 
     condition_type = models.JSONField(null=True, blank=True)
     code = models.JSONField(null=True, blank=True)
@@ -566,6 +576,26 @@ class ClaimCondition(ClaimExtensionBase):
             p.get("MultipleStratificationAllowed")
         )
         self.cyclic_procedure = yn(p.get("CyclicProcedure"))
+        self.standalone = yn(p.get("Standalone"))
+        self.lama_dama_procedure = yn(p.get("LamaDamaProcedure"))
+        self.unspecified = yn(p.get("Unspecified"))
+
+        parent = p.get("ParentProcedure")
+        if (
+            isinstance(parent, str)
+            and parent.strip()
+            and parent.strip().upper() != "NA"
+        ):
+            self.parent_procedure = parent.strip()
+        else:
+            self.parent_procedure = None
+
+        discharge = p.get("DischargeStagesLamaDamaProcedure")
+        self.discharge_stages_lama_dama_procedure = (
+            discharge.strip()
+            if isinstance(discharge, str) and discharge.strip()
+            else None
+        )
 
         for attr, key in (
             ("quantity_allowed", "QuantityAllowed"),

@@ -126,6 +126,12 @@ class ClaimConditionSpec(EMRResource):
     maximum_stratification_allowed: int | None = None
     cyclic_procedure: bool | None = None
     maximum_cycles_allowed: int | None = None
+    standalone: bool | None = None
+    parent_procedure: str | None = None
+    parent_procedures: list[str] = []
+    lama_dama_procedure: bool | None = None
+    discharge_stages_lama_dama_procedure: str | None = None
+    unspecified: bool | None = None
     condition_type: dict | None = None
     code: dict | None = None
     description: str | None = None
@@ -134,6 +140,11 @@ class ClaimConditionSpec(EMRResource):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
+        mapping["parent_procedures"] = (
+            [c.strip() for c in obj.parent_procedure.split(",") if c.strip()]
+            if obj.parent_procedure
+            else []
+        )
 
 
 class ClaimExclusionSpec(EMRResource):
