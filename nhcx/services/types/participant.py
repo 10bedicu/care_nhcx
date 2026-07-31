@@ -12,6 +12,7 @@ class FetchParticipantsBody(BaseModel):
     role: Literal["PAYER", "PROVIDER", "TPA"]
     fromdate: str  # dd/MM/yyyy
     todate: str  # dd/MM/yyyy
+    entitytype: Literal["GOV", "PVT", "ALL"] = "ALL"
 
 
 class ParticipantSummary(BaseModel):
@@ -36,7 +37,7 @@ class Policy(BaseModel):
     mobilenumber: str
     memberid: str
     payerid: str
-    productid: str
+    productid: str | None = None
     productname: str
     processingid: str
     policy_period: PolicyPeriod | None = None

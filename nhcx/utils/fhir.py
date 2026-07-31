@@ -668,7 +668,8 @@ class Fhir:
                         ]
                     ),
                     system="https://payer.nha.gov.in",
-                    value=coverage.policy.productid,
+                    value=coverage.policy.productid
+                    or coverage.insurer.participant_code.strip("@hcx"),
                 )
             ],
             subscriberId=coverage.policy.memberid,

@@ -8,9 +8,9 @@ def get_policy_key(request: CoverageEligibilityRequest) -> str:
 
     focal = next((entry for entry in insurance if entry.get("focal")), insurance[0])
     policy = focal.get("policy") or {}
-    memberid = policy.get("memberid", "")
-    payerid = policy.get("payerid", "")
-    productid = policy.get("productid", "")
+    memberid = policy.get("memberid") or ""
+    payerid = policy.get("payerid") or ""
+    productid = policy.get("productid") or ""
 
     if memberid or payerid or productid:
         return f"{memberid}:{payerid}:{productid}"
