@@ -16,7 +16,6 @@ from fhir.resources.R4B.claim import (
     ClaimDiagnosis,
     ClaimInsurance,
     ClaimItem,
-    ClaimItemDetail,
     ClaimPayee,
     ClaimProcedure,
     ClaimRelated,
@@ -1401,6 +1400,7 @@ class Fhir:
                         productOrService=(
                             self._coding_to_codable_concept(
                                 CodingSpec(**item.get("product_or_service")),
+                                text=item.get("product_or_service_text") or None,
                             )
                             if item.get("product_or_service")
                             else None
@@ -1456,23 +1456,6 @@ class Fhir:
                             currency="INR",
                         ),
                         factor=item.get("factor"),
-                        detail=(
-                            [
-                                ClaimItemDetail(
-                                    sequence=detail_index + 1,
-                                    productOrService=CodeableConcept(
-                                        text=(detail.get("productOrService") or {}).get(
-                                            "text"
-                                        ),
-                                    ),
-                                )
-                                for detail_index, detail in enumerate(
-                                    item.get("detail") or []
-                                )
-                                if (detail.get("productOrService") or {}).get("text")
-                            ]
-                            or None
-                        ),
                     )
                     for item in claim.item
                 ]

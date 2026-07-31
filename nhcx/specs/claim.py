@@ -256,6 +256,7 @@ class ClaimItemSpec(BaseModel):
     information_sequence: list[int] = []
     category: dict | None = None
     product_or_service: dict | None = None
+    product_or_service_text: str | None = None
     modifier: list[dict] = []
     charge_items: list[UUID4] = []
     program_code: list[dict] = []
@@ -263,7 +264,6 @@ class ClaimItemSpec(BaseModel):
     quantity: Quantity | None = None
     unit_price: float | None = None  # in INR
     factor: float | None = None
-    detail: list[dict] = []
 
     @field_validator("charge_items")
     @classmethod
