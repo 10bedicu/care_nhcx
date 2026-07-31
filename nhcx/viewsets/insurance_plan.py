@@ -135,9 +135,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
                             }
                         ]
                     },
-                    "valueString": data.policy.productname
-                    if settings.PAYER == "PMJAY"
-                    else "100217",
+                    "valueString": data.policy.productid,
                 },
                 {
                     "type": {
@@ -149,9 +147,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
                             }
                         ]
                     },
-                    "valueString": provider.facility.healthfacility.hf_id
-                    if settings.PAYER == "PMJAY"
-                    else "32722",
+                    "valueString": provider.facility.healthfacility.hf_id,
                 },
             ],
             output=[],
@@ -164,9 +160,7 @@ class InsurancePlanViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
         encrypted_payload = NHCX.encrypt(
             data=fhir_payload,
             sender_code=provider.participant_code,
-            recipient_code=data.policy.payerid
-            if settings.PAYER == "PMJAY"
-            else "1000003538@hcx",
+            recipient_code=data.policy.payerid,
             patient_abha_number=data.policy.abhanumber,
             correlation_id=str(task.external_id),
             status="request.initiated",

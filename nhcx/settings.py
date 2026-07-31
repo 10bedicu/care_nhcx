@@ -104,7 +104,6 @@ NHCX_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULTS = {
     "BACKEND_DOMAIN": "https://careapi.ohc.network",
-    "PAYER": "PMJAY",  # DUMMY | PMJAY
     "LOGS_DIR": str(NHCX_PLUGIN_ROOT / "logs"),
     "NHCX_DEBUG": True,
     "NHCX_USERNAME": "nhcx_user_internal",
