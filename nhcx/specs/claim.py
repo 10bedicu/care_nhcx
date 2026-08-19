@@ -13,6 +13,7 @@ from care.emr.models.condition import Condition
 from care.emr.models.encounter import Encounter
 from care.emr.models.file_upload import FileUpload
 from care.emr.models.patient import Patient
+from care.emr.registries.care_valueset.care_valueset import validate_valueset
 from care.emr.resources.base import EMRResource, PeriodSpec
 from care.emr.resources.charge_item.spec import ChargeItemReadSpec
 from care.emr.resources.common.coding import Coding
@@ -61,6 +62,10 @@ class ClaimDiagnosisOnAdmissionChoices(str, Enum):
     YES = "yes"
     NO = "no"
     UNKNOWN = "unknown"
+
+
+FREE_TEXT_PROCEDURE_SYSTEM = "https://payer.pmjay.nha.gov.in"
+UNSPECIFIED_PROCEDURE_CODE_SUFFIX = "U100"
 
 
 class ClaimCareTeamSpec(BaseModel):
@@ -118,9 +123,20 @@ class ClaimProcedureSpec(BaseModel):
     type: list[ValueSetBoundCoding[NHCX_CLAIM_PROCEDURE_TYPE_VALUESET.slug]] = []
     date: datetime | None = None
     procedure_reference: UUID4 | None = None
-    procedure_code: (
-        ValueSetBoundCoding[NHCX_CLAIM_PROCEDURE_CODE_VALUESET.slug] | None
-    ) = None
+    procedure_code: Coding | None = None
+
+    @field_validator("procedure_code")
+    @classmethod
+    def validate_procedure_code(cls, value):
+        if value is None:
+            return value
+        if value.system == FREE_TEXT_PROCEDURE_SYSTEM:
+            if not (value.code or "").strip():
+                raise ValidationError("Free text procedure code must not be empty")
+            return value
+        return validate_valueset(
+            "procedure_code", NHCX_CLAIM_PROCEDURE_CODE_VALUESET.slug, value
+        )
 
     @field_validator("procedure_reference")
     @classmethod
@@ -485,6 +501,24 @@ class ClaimCreateSpec(ClaimBaseSpec):
         if not Provider.objects.filter(facility__external_id=value).exists():
             raise ValidationError("Provider not found")
         return value
+
+    @model_validator(mode="after")
+    def validate_free_text_procedures(self):
+        has_free_text = any(
+            p.procedure_code
+            and p.procedure_code.system == FREE_TEXT_PROCEDURE_SYSTEM
+            for p in self.procedure
+        )
+        if has_free_text and not all(
+            ((item.product_or_service or {}).get("code") or "").endswith(
+                UNSPECIFIED_PROCEDURE_CODE_SUFFIX
+            )
+            for item in self.item
+        ):
+            raise ValidationError(
+                "Free text procedures are only allowed for unspecified benefit items"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_sequences(self):
