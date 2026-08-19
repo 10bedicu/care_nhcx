@@ -8,7 +8,7 @@ from nhcx.models.claim_consent import ClaimConsent
 
 class ClaimConsentRetrieveSpec(EMRResource):
     __model__ = ClaimConsent
-    __exclude__ = ["encounter", "patient", "claim"]
+    __exclude__ = ["encounter", "patient", "claim", "account"]
 
     id: UUID4 | None = None
     created_date: datetime | None = None
@@ -18,6 +18,8 @@ class ClaimConsentRetrieveSpec(EMRResource):
     claim: UUID4 | None = None
     encounter: UUID4 | None = None
     patient: UUID4 | None = None
+    account: UUID4 | None = None
+    cycle: int | None = None
     expires_in: int
     refresh_expires_in: int
     accounts: list[dict] = []
@@ -28,3 +30,4 @@ class ClaimConsentRetrieveSpec(EMRResource):
         mapping["encounter"] = obj.encounter.external_id
         mapping["patient"] = obj.patient.external_id
         mapping["claim"] = obj.claim.external_id if obj.claim else None
+        mapping["account"] = obj.account.external_id if obj.account else None

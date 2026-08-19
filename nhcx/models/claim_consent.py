@@ -32,6 +32,14 @@ class ClaimConsent(EMRBaseModel):
         on_delete=models.CASCADE,
         related_name="claim_consents",
     )
+    account = models.ForeignKey(
+        "emr.Account",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="claim_consents",
+    )
+    cycle = models.PositiveIntegerField(null=True, blank=True)
     token = models.TextField()
     expires_in = models.PositiveIntegerField()
     refresh_token = models.TextField()

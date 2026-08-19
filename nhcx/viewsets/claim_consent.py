@@ -19,6 +19,7 @@ class ClaimConsentFilter(filters.FilterSet):
     claim = filters.UUIDFilter(field_name="claim__external_id")
     encounter = filters.UUIDFilter(field_name="encounter__external_id")
     patient = filters.UUIDFilter(field_name="patient__external_id")
+    account = filters.UUIDFilter(field_name="account__external_id")
     payer_id = filters.CharFilter(field_name="payer_id")
     stage = filters.CharFilter(field_name="stage")
 
@@ -33,7 +34,9 @@ class ClaimConsentViewSet(EMRListMixin, EMRRetrieveMixin, EMRBaseViewSet):
     def get_queryset(self):
         return (
             self.database_model.objects.filter(deleted=False)
-            .select_related("encounter", "patient", "encounter__facility", "claim")
+            .select_related(
+                "encounter", "patient", "encounter__facility", "claim", "account"
+            )
             .order_by("-modified_date")
         )
 

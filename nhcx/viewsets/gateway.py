@@ -1,3 +1,4 @@
+from django.db.models import Max
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -6,6 +7,7 @@ from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet
 from care.emr.models import Encounter
+from care.emr.models.account import Account
 from nhcx.models.claim import Claim
 from nhcx.models.claim_consent import ClaimConsent, ClaimConsentStage
 from nhcx.services.abha_biometric import AbhaBiometricService
@@ -23,6 +25,33 @@ from nhcx.services.types.participant import (
     GetPoliciesBody,
     GetPoliciesResponse,
 )
+
+
+def _resolve_consent_account(encounter, claim):
+    if claim and claim.account_id:
+        return claim.account
+    return Account.objects.filter(primary_encounter=encounter).first()
+
+
+def _resolve_consent_cycle(account, encounter, claim):
+    initiating_encounter_id = claim.encounter_id if claim else None
+    if initiating_encounter_id and initiating_encounter_id == encounter.id:
+        return 0
+    if account is None:
+        return 0
+    existing = (
+        ClaimConsent.objects.filter(account=account, encounter=encounter)
+        .exclude(cycle__isnull=True)
+        .order_by("cycle")
+        .first()
+    )
+    if existing is not None:
+        return existing.cycle
+    max_cycle = ClaimConsent.objects.filter(account=account).aggregate(Max("cycle"))[
+        "cycle__max"
+    ]
+    return (max_cycle or 0) + 1
+
 
 class GatewayViewSet(EMRBaseViewSet):
     @action(detail=False, methods=["POST"], url_path="get_policies")
@@ -86,6 +115,8 @@ class GatewayViewSet(EMRBaseViewSet):
             if service_body.process == "Preauth"
             else ClaimConsentStage.CLAIM
         )
+        account = _resolve_consent_account(encounter, claim)
+        cycle = _resolve_consent_cycle(account, encounter, claim)
         ClaimConsent.objects.update_or_create(
             encounter=encounter,
             payer_id=body.payerId,
@@ -96,6 +127,8 @@ class GatewayViewSet(EMRBaseViewSet):
                 "stage": stage,
                 "claim": claim,
                 "patient": encounter.patient,
+                "account": account,
+                "cycle": cycle,
                 "token": verify_response.token,
                 "expires_in": verify_response.expiresIn,
                 "refresh_token": verify_response.refreshToken,
