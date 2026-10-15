@@ -800,7 +800,7 @@ At every step the provider is funnelled by a single contextual action on the lat
 - A **Celery worker** must be running, because all inbound callbacks are processed asynchronously (`process_nhcx_callback`).
 - **Migrations:** the plugin ships its own migrations (`0001` to `0019`); run `makemigrations` and `migrate` after install.
 - **Public reachability:** `BACKEND_DOMAIN` must be a publicly reachable HTTPS URL, because NHCX posts callbacks to `BACKEND_DOMAIN/api/nhcx/v1/...`.
-- **Chunked transfer:** NHCX may send callbacks with `Transfer-Encoding: chunked` and no `Content-Length`. `config/middlewares.py::ChunkedTransferEncodingMiddleware` rewires those requests so `request.data` works; ensure it is enabled and that the WSGI server (Gunicorn or werkzeug) sets `wsgi.input_terminated`.
+- **Chunked transfer:** NHCX may send callbacks with `Transfer-Encoding: chunked` and no `Content-Length`. `nhcx.middleware.ChunkedTransferEncodingMiddleware` rewires those requests so `request.data` works. The plug registers it at startup. The WSGI server (Gunicorn or werkzeug) must set `wsgi.input_terminated`.
 
 ### 5.2 Provider onboarding
 
